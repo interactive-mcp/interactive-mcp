@@ -58,6 +58,11 @@
         "command": "interactiveMcp.stopServer",
         "title": "Stop Local MCP Server",
         "category": "Interactive MCP"
+      },
+      {
+        "command": "interactiveMcp.copyMcpConfig",
+        "title": "Copy MCP JSON Configuration",
+        "category": "Interactive MCP"
       }
     ],
     "configuration": {
@@ -82,16 +87,6 @@
           "type": "string",
           "default": "",
           "description": "Custom path to the MCP server executable (leave empty for auto-detection)"
-        },
-        "interactiveMcp.useNpx": {
-          "type": "boolean",
-          "default": false,
-          "description": "Use npx to run the MCP server (no global installation required)"
-        },
-        "interactiveMcp.serverPackage": {
-          "type": "string",
-          "default": "interactive-mcp-server",
-          "description": "npm package name for the MCP server"
         }
       }
     }

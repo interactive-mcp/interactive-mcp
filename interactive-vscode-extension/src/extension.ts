@@ -43,11 +43,20 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    context.subscriptions.push(
+        vscode.commands.registerCommand('interactiveMcp.copyMcpConfig', () => {
+            copyMcpConfiguration(context, true);
+        })
+    );
+
     // Auto-connect if enabled
     const config = vscode.workspace.getConfiguration('interactiveMcp');
     if (config.get<boolean>('autoConnect')) {
         connectToMcpServer(context);
     }
+
+    // Show installation notification with MCP config option
+    showInstallationWelcome(context);
 }
 
 async function startLocalMcpServer(context: vscode.ExtensionContext): Promise<boolean> {
@@ -85,36 +94,18 @@ async function startLocalMcpServer(context: vscode.ExtensionContext): Promise<bo
 
 async function startNewServer(context: vscode.ExtensionContext): Promise<boolean> {
     try {
-        const config = vscode.workspace.getConfiguration('interactiveMcp');
-        const useNpx = config.get<boolean>('useNpx');
-        const serverPackage = config.get<string>('serverPackage') || 'interactive-mcp-server';
+        const serverPath = getServerPath(context);
         
-        let command: string;
-        let args: string[];
-        
-        if (useNpx) {
-            // Use npx to run the server (no global installation required)
-            command = 'npx';
-            args = [serverPackage];
-            console.log('Starting MCP server with npx:', serverPackage);
-        } else {
-            // Try bundled server or custom path
-            const serverPath = getServerPath(context);
-            
-            if (!serverPath) {
-                vscode.window.showErrorMessage('MCP server not found. Enable "Use npx" setting or install the server.');
-                return false;
-            }
-
-            command = 'node';
-            args = [serverPath];
-            console.log('Starting MCP server at:', serverPath);
+        if (!serverPath) {
+            vscode.window.showErrorMessage('MCP server not found. Please ensure the extension is properly installed.');
+            return false;
         }
+
+        console.log('Starting MCP server at:', serverPath);
         
-        mcpServerProcess = spawn(command, args, {
+        mcpServerProcess = spawn('node', [serverPath], {
             stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env, NODE_ENV: 'production' },
-            shell: true // Enable shell for npx on Windows
+            env: { ...process.env, NODE_ENV: 'production' }
         });
 
         mcpServerProcess.stdout?.on('data', (data) => {
@@ -133,21 +124,7 @@ async function startNewServer(context: vscode.ExtensionContext): Promise<boolean
         mcpServerProcess.on('error', (error) => {
             console.error('Failed to start MCP server:', error);
             mcpServerProcess = undefined;
-            
-            if (useNpx && error.message.includes('ENOENT')) {
-                vscode.window.showErrorMessage(
-                    'npx not found. Please install Node.js or disable "Use npx" setting.',
-                    'Install Node.js', 'Open Settings'
-                ).then(action => {
-                    if (action === 'Install Node.js') {
-                        vscode.env.openExternal(vscode.Uri.parse('https://nodejs.org/'));
-                    } else if (action === 'Open Settings') {
-                        vscode.commands.executeCommand('workbench.action.openSettings', 'interactiveMcp.useNpx');
-                    }
-                });
-            } else {
-                vscode.window.showErrorMessage(`Failed to start MCP server: ${error.message}`);
-            }
+            vscode.window.showErrorMessage(`Failed to start MCP server: ${error.message}`);
         });
 
         // Wait a moment for the server to start
@@ -203,18 +180,10 @@ async function connectToMcpServer(context: vscode.ExtensionContext) {
         return;
     }
 
-    // Try to start local server if auto-start is enabled
+    // Try to start local server if auto-start is enabled (but don't block on failure)
     if (autoStartServer) {
-        const serverStarted = await startLocalMcpServer(context);
-        if (!serverStarted) {
-            const action = await vscode.window.showWarningMessage(
-                'Could not start local MCP server. Try connecting to an external server?',
-                'Connect Anyway', 'Cancel'
-            );
-            if (action !== 'Connect Anyway') {
-                return;
-            }
-        }
+        await startLocalMcpServer(context);
+        // Continue regardless of whether server started - it might already be running
     }
 
     wsClient = new WebSocket(`ws://localhost:${port}`);
@@ -1246,6 +1215,75 @@ function createWarmChimeHTML(): string {
             }
         </script>
     `;
+}
+
+// Generate and copy MCP configuration JSON to clipboard
+async function copyMcpConfiguration(context: vscode.ExtensionContext, fromCommandPalette: boolean = false) {
+    try {
+        const serverPath = getServerPath(context);
+        
+        if (!serverPath) {
+            vscode.window.showErrorMessage('MCP server not found. Please ensure the extension is properly installed.');
+            return false;
+        }
+
+        const mcpServerConfig = {
+            "command": "node",
+            "args": [serverPath]
+        };
+
+        const configJson = `"interactive-mcp": ${JSON.stringify(mcpServerConfig, null, 2)}`;
+        await vscode.env.clipboard.writeText(configJson);
+        
+        if (fromCommandPalette) {
+            vscode.window.showInformationMessage(
+                '✅ MCP configuration copied to clipboard!'
+            );
+        }
+
+        return true;
+
+    } catch (error) {
+        console.error('Error generating MCP config:', error);
+        vscode.window.showErrorMessage(`Failed to generate MCP configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        return false;
+    }
+}
+
+
+// Show installation welcome message with MCP config option
+async function showInstallationWelcome(context: vscode.ExtensionContext) {
+    const hasShownWelcome = context.globalState.get('hasShownWelcome', false);
+    
+    if (!hasShownWelcome) {
+        // Mark as shown first to avoid repeated prompts
+        await context.globalState.update('hasShownWelcome', true);
+        
+        await showWelcomeNotification(context);
+    }
+}
+
+// Show stateful welcome notification that updates after copying
+async function showWelcomeNotification(context: vscode.ExtensionContext, hasCopied: boolean = false) {
+    const message = hasCopied 
+        ? '✅ MCP configuration copied to clipboard!'
+        : '🎉 Interactive MCP Helper installed! Get your MCP configuration to connect AI assistants.';
+    
+    const copyButton = hasCopied ? 'Copied ✓' : 'Copy MCP JSON';
+    
+    const action = await vscode.window.showInformationMessage(
+        message,
+        copyButton,
+        'Dismiss'
+    );
+
+    if (action === copyButton && !hasCopied) {
+        const success = await copyMcpConfiguration(context, false);
+        if (success) {
+            // Show updated notification with copied state
+            await showWelcomeNotification(context, true);
+        }
+    }
 }
 
  

@@ -6,7 +6,8 @@ import { createHash } from "crypto";
 
 // WebSocket server for VS Code extension communication
 const wss = new WebSocketServer({ port: 8547 });
-let vsCodeClient: WebSocket | null = null;
+const vsCodeClients = new Set<WebSocket>();
+let isWebSocketReady = false;
 
 // Map to store pending requests
 const pendingRequests = new Map<string, {
@@ -17,8 +18,9 @@ const pendingRequests = new Map<string, {
 
 // Handle VS Code extension connections
 wss.on("connection", (ws) => {
-  console.log("VS Code extension connected");
-  vsCodeClient = ws;
+  console.log(`VS Code extension connected (${vsCodeClients.size + 1} total)`);
+  vsCodeClients.add(ws);
+  isWebSocketReady = true;
 
   ws.on("message", (data) => {
     try {
@@ -37,8 +39,11 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
-    console.log("VS Code extension disconnected");
-    vsCodeClient = null;
+    vsCodeClients.delete(ws);
+    console.log(`VS Code extension disconnected (${vsCodeClients.size} remaining)`);
+    if (vsCodeClients.size === 0) {
+      isWebSocketReady = false;
+    }
   });
 });
 
@@ -57,7 +62,7 @@ async function requestUserInput(
   type: "buttons" | "text" | "confirm",
   options: any
 ): Promise<any> {
-  if (!vsCodeClient || vsCodeClient.readyState !== WebSocket.OPEN) {
+  if (!isWebSocketReady || vsCodeClients.size === 0) {
     throw new Error("VS Code extension is not connected");
   }
 
@@ -69,7 +74,15 @@ async function requestUserInput(
     // No timeout - let users take their time to appreciate the beautiful UI!
     pendingRequests.set(requestId, { resolve, reject, timeout: null as any });
 
-    vsCodeClient!.send(
+    // Send to the first available client (you could enhance this to show UI in all instances)
+    const firstClient = Array.from(vsCodeClients).find(client => client.readyState === WebSocket.OPEN);
+    
+    if (!firstClient) {
+      reject(new Error("No active VS Code connections available"));
+      return;
+    }
+
+    firstClient.send(
       JSON.stringify({
         type: "request",
         requestId,
@@ -206,17 +219,22 @@ server.tool(
   },
   async ({ type, message }) => {
     try {
-      if (!vsCodeClient || vsCodeClient.readyState !== WebSocket.OPEN) {
+      if (!isWebSocketReady || vsCodeClients.size === 0) {
         throw new Error("VS Code extension is not connected");
       }
 
-      vsCodeClient.send(
-        JSON.stringify({
-          type: "notification",
-          notificationType: type,
-          message,
-        })
-      );
+      // Send notification to all connected clients
+      vsCodeClients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(
+            JSON.stringify({
+              type: "notification",
+              notificationType: type,
+              message,
+            })
+          );
+        }
+      });
 
       return {
         content: [
@@ -284,9 +302,27 @@ server.tool(
 // Start the server
 async function main() {
   const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.log("Interactive MCP Server running on stdio");
+  
+  // Start WebSocket server but don't announce readiness yet
   console.log("WebSocket server listening on port 8547 for VS Code extension");
+  
+  // Wait for VS Code extension to connect before announcing MCP readiness
+  console.log("Waiting for VS Code extension connection...");
+  
+  // Connect to MCP transport only after WebSocket is ready
+  await new Promise<void>((resolve) => {
+    const checkWebSocket = () => {
+      if (isWebSocketReady) {
+        resolve();
+      } else {
+        setTimeout(checkWebSocket, 100);
+      }
+    };
+    checkWebSocket();
+  });
+  
+  await server.connect(transport);
+  console.log("Interactive MCP Server ready - VS Code extension connected and MCP stdio active");
 }
 
 main().catch((error) => {

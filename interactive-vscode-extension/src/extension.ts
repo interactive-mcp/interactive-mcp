@@ -52,10 +52,38 @@ export function activate(context: vscode.ExtensionContext) {
 
 async function startLocalMcpServer(context: vscode.ExtensionContext): Promise<boolean> {
     if (mcpServerProcess) {
-        console.log('MCP server already running');
+        console.log('MCP server already running in this instance');
         return true;
     }
 
+    // Check if another instance is already running on port 8547
+    const config = vscode.workspace.getConfiguration('interactiveMcp');
+    const port = config.get<number>('serverPort') || 8547;
+    
+    try {
+        // Try to connect to see if server is already running
+        const testSocket = new (require('ws'))(`ws://localhost:${port}`);
+        
+        return new Promise((resolve) => {
+            testSocket.on('open', () => {
+                console.log(`MCP server already running on port ${port} (started by another instance)`);
+                testSocket.close();
+                resolve(true);
+            });
+            
+            testSocket.on('error', () => {
+                // No server running, we should start one
+                testSocket.close();
+                startNewServer(context).then(resolve);
+            });
+        });
+    } catch (error) {
+        // Fallback to starting new server
+        return startNewServer(context);
+    }
+}
+
+async function startNewServer(context: vscode.ExtensionContext): Promise<boolean> {
     try {
         const config = vscode.workspace.getConfiguration('interactiveMcp');
         const useNpx = config.get<boolean>('useNpx');

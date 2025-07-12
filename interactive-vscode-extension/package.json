@@ -1,0 +1,126 @@
+{
+  "name": "interactive-mcp-helper",
+  "displayName": "Interactive MCP Helper",
+  "description": "Enable AI assistants to show interactive popups and gather user input seamlessly in VS Code",
+  "version": "0.1.0",
+  "publisher": "interactive-mcp",
+  "author": {
+    "name": "Interactive MCP Team",
+    "email": "contact@interactive-mcp.dev"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/interactive-mcp/interactive-mcp-helper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/interactive-mcp/interactive-mcp-helper/issues"
+  },
+  "homepage": "https://github.com/interactive-mcp/interactive-mcp-helper#readme",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Other",
+    "Extension Packs"
+  ],
+  "keywords": [
+    "mcp",
+    "ai",
+    "assistant",
+    "interactive",
+    "popup",
+    "claude",
+    "automation"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "interactiveMcp.connect",
+        "title": "Connect to MCP Server",
+        "category": "Interactive MCP"
+      },
+      {
+        "command": "interactiveMcp.disconnect", 
+        "title": "Disconnect from MCP Server",
+        "category": "Interactive MCP"
+      },
+      {
+        "command": "interactiveMcp.startServer",
+        "title": "Start Local MCP Server",
+        "category": "Interactive MCP"
+      },
+      {
+        "command": "interactiveMcp.stopServer",
+        "title": "Stop Local MCP Server",
+        "category": "Interactive MCP"
+      }
+    ],
+    "configuration": {
+      "title": "Interactive MCP Helper",
+      "properties": {
+        "interactiveMcp.serverPort": {
+          "type": "number",
+          "default": 8547,
+          "description": "WebSocket port to connect to the MCP server"
+        },
+        "interactiveMcp.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically connect to the MCP server on startup"
+        },
+        "interactiveMcp.autoStartServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the local MCP server if not running"
+        },
+        "interactiveMcp.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to the MCP server executable (leave empty for auto-detection)"
+        },
+        "interactiveMcp.useNpx": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use npx to run the MCP server (no global installation required)"
+        },
+        "interactiveMcp.serverPackage": {
+          "type": "string",
+          "default": "interactive-mcp-server",
+          "description": "npm package name for the MCP server"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile && npm run bundle-server",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "publish": "vsce publish",
+    "bundle-server": "npm run build-server && npm run copy-server",
+    "build-server": "cd ../interactive-mcp-server && npm install && npm run build",
+    "copy-server": "node scripts/copy-server.js",
+    "start-local-server": "node bundled-server/dist/index.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.60.0",
+    "@types/node": "16.x",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^5.45.0",
+    "@typescript-eslint/parser": "^5.45.0",
+    "eslint": "^8.28.0",
+    "typescript": "^4.9.3",
+    "@vscode/vsce": "^2.15.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

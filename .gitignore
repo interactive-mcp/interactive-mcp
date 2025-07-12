@@ -1,0 +1,92 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn
+
+# Build outputs
+dist/
+out/
+build/
+lib/
+
+# VS Code Extension
+*.vsix
+.vscode-test/
+.vscode/settings.json
+
+# TypeScript
+*.tsbuildinfo
+*.d.ts.map
+
+# Logs
+logs/
+*.log
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Personal configuration files
+claude_desktop_config.json
+config.json
+settings.json
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Package manager lock files (uncomment if you want to ignore them)
+# package-lock.json
+# yarn.lock
+
+# Built documentation
+docs/build/
+
+# Test coverage
+.nyc_output
+
+# Runtime configuration
+.config/
+
+# Bundled server (if auto-generated)
+interactive-vscode-extension/bundled-server/
+
+# Development test files
+test-*.html
+
+*.md

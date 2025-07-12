@@ -254,8 +254,6 @@ async function handleMcpRequest(message: any) {
                 response: response
             }));
         }
-    } else if (message.type === 'notification') {
-        showNotification(message.notificationType, message.message);
     } else if (message.type === 'command') {
         handleCommand(message.command, message.options);
     }
@@ -274,6 +272,7 @@ async function handleButtonsRequest(options: any): Promise<any> {
                 localResourceRoots: []
             }
         );
+        playAlertSound();
 
         // Get current theme
         const currentTheme = vscode.window.activeColorTheme.kind;
@@ -364,7 +363,19 @@ function createButtonDialogHTML(options: any, isDark: boolean): string {
                 width: 100%;
                 box-shadow: 0 8px 32px rgba(0,0,0,0.4);
                 text-align: center;
-                animation: slideIn 0.2s ease-out;
+                animation: slideIn 0.2s ease-out, glow 3s ease-in-out infinite;
+            }
+            
+            /* Subtle attention-grabbing glow effect */
+            @keyframes glow {
+                0%, 100% { 
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+                    border-color: ${borderColor};
+                }
+                50% { 
+                    box-shadow: 0 8px 32px rgba(14, 99, 156, 0.5);
+                    border-color: ${buttonBg}80;
+                }
             }
             
             @keyframes slideIn {
@@ -596,6 +607,7 @@ function createConfirmHTML(options: any, isDark: boolean): string {
     const cancelBg = isDark ? '#3c3c3c' : '#e1e1e1';
     const cancelHover = isDark ? '#505050' : '#d4d4d4';
     const cancelText = isDark ? '#cccccc' : '#333333';
+    const overlayBg = isDark ? 'rgba(0,0,0,0.7)' : 'rgba(0,0,0,0.5)';
 
     return `
         <!DOCTYPE html>
@@ -611,13 +623,12 @@ function createConfirmHTML(options: any, isDark: boolean): string {
                 }
                 body {
                     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    background-color: rgba(0, 0, 0, 0.5);
-                    width: 100vw;
+                    background: ${overlayBg};
                     height: 100vh;
                     display: flex;
-                    justify-content: center;
                     align-items: center;
-                    backdrop-filter: blur(2px);
+                    justify-content: center;
+                    padding: 20px;
                 }
                 .modal {
                     background-color: ${bgColor};
@@ -627,7 +638,20 @@ function createConfirmHTML(options: any, isDark: boolean): string {
                     min-width: 400px;
                     max-width: 600px;
                     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-                    animation: slideIn 0.2s ease-out;
+                    animation: slideIn 0.2s ease-out, glow 3s ease-in-out infinite;
+                    text-align: center;
+                }
+                
+                /* Subtle attention-grabbing glow effect */
+                @keyframes glow {
+                    0%, 100% { 
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                        border-color: ${borderColor};
+                    }
+                    50% { 
+                        box-shadow: 0 8px 32px rgba(14, 99, 156, 0.4);
+                        border-color: ${buttonBg}80;
+                    }
                 }
                 @keyframes slideIn {
                     from {
@@ -639,24 +663,27 @@ function createConfirmHTML(options: any, isDark: boolean): string {
                         transform: translateY(0) scale(1);
                     }
                 }
+                @keyframes fadeIn {
+                    from { opacity: 0; }
+                    to { opacity: 1; }
+                }
                 .title {
                     font-size: 18px;
                     font-weight: 600;
                     color: ${textColor};
                     margin-bottom: 16px;
-                    text-align: center;
                 }
                 .message {
                     font-size: 14px;
                     color: ${textColor};
                     margin-bottom: 24px;
                     line-height: 1.5;
-                    text-align: center;
                 }
                 .buttons {
                     display: flex;
                     gap: 12px;
                     justify-content: center;
+                    margin-bottom: 16px;
                 }
                 button {
                     padding: 10px 20px;
@@ -684,15 +711,93 @@ function createConfirmHTML(options: any, isDark: boolean): string {
                     background-color: ${cancelHover};
                     transform: translateY(-1px);
                 }
+                .text-input-section {
+                    border-top: 1px solid ${borderColor};
+                    padding-top: 16px;
+                    display: none;
+                    animation: fadeIn 0.2s ease-out;
+                }
+                .text-input-section.show {
+                    display: block;
+                }
+                .text-input {
+                    width: 100%;
+                    padding: 8px 12px;
+                    border: 1px solid ${borderColor};
+                    border-radius: 4px;
+                    background: ${bgColor};
+                    color: ${textColor};
+                    font-size: 13px;
+                    margin-bottom: 12px;
+                    outline: none;
+                }
+                .text-input:focus {
+                    border-color: ${buttonBg};
+                    box-shadow: 0 0 0 2px ${buttonBg}20;
+                }
+                .control-buttons {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    gap: 8px;
+                }
+                .text-btn {
+                    background: transparent;
+                    border: 1px solid ${borderColor};
+                    color: ${textColor};
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 12px;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    transition: all 0.2s;
+                }
+                .text-btn:hover {
+                    background: ${borderColor};
+                }
+                .action-buttons {
+                    display: flex;
+                    gap: 8px;
+                }
+                .submit-btn {
+                    background: ${buttonBg};
+                    color: white;
+                    border: none;
+                    padding: 6px 16px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 12px;
+                    transition: all 0.2s;
+                }
+                .submit-btn:hover {
+                    background: ${buttonHover};
+                }
             </style>
         </head>
         <body>
             <div class="modal">
                 <div class="title">${options.title || 'Confirm'}</div>
                 <div class="message">${options.message}</div>
+                
                 <div class="buttons">
-                    <button class="cancel-btn" onclick="sendCancel()">No</button>
-                    <button class="confirm-btn" onclick="sendConfirm()" autofocus>Yes</button>
+                    <button class="cancel-btn" onclick="sendCancel()">${options.cancelText || 'No'}</button>
+                    <button class="confirm-btn" onclick="sendConfirm()" autofocus>${options.confirmText || 'Yes'}</button>
+                </div>
+                
+                <div class="text-input-section" id="textSection">
+                    <input type="text" class="text-input" id="textInput" placeholder="Explain your choice...">
+                    <div class="action-buttons">
+                        <button class="cancel-btn" onclick="hideTextInput()">Cancel</button>
+                        <button class="submit-btn" onclick="submitText()">Submit</button>
+                    </div>
+                </div>
+                
+                <div class="control-buttons">
+                    <button class="text-btn" onclick="showTextInput()">
+                        📝 Custom response
+                    </button>
                 </div>
             </div>
             ${createQuickPingHTML()}
@@ -713,16 +818,46 @@ function createConfirmHTML(options: any, isDark: boolean): string {
                     });
                 }
                 
+                function showTextInput() {
+                    document.getElementById('textSection').classList.add('show');
+                    document.getElementById('textInput').focus();
+                }
+                
+                function hideTextInput() {
+                    document.getElementById('textSection').classList.remove('show');
+                }
+                
+                function submitText() {
+                    const text = document.getElementById('textInput').value.trim();
+                    if (text) {
+                        vscode.postMessage({
+                            command: 'textInput',
+                            text: text
+                        });
+                    }
+                }
+                
                 // Keyboard shortcuts
                 document.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') {
+                    if (e.key === 'Enter' && !document.getElementById('textSection').classList.contains('show')) {
                         sendConfirm();
                     } else if (e.key === 'Escape') {
-                        sendCancel();
+                        if (document.getElementById('textSection').classList.contains('show')) {
+                            hideTextInput();
+                        } else {
+                            sendCancel();
+                        }
                     }
                 });
                 
-                // Focus the confirm button
+                // Handle Enter key in text input
+                document.getElementById('textInput').addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        submitText();
+                    }
+                });
+                
+                // Focus the confirm button initially
                 document.querySelector('.confirm-btn').focus();
             </script>
         </body>
@@ -772,7 +907,19 @@ function createTextInputHTML(options: any, isDark: boolean): string {
                     min-width: 450px;
                     max-width: 600px;
                     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-                    animation: slideIn 0.2s ease-out;
+                    animation: slideIn 0.2s ease-out, glow 3s ease-in-out infinite;
+                }
+                
+                /* Subtle attention-grabbing glow effect */
+                @keyframes glow {
+                    0%, 100% { 
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                        border-color: ${borderColor};
+                    }
+                    50% { 
+                        box-shadow: 0 8px 32px rgba(14, 99, 156, 0.4);
+                        border-color: ${buttonBg}80;
+                    }
                 }
                 @keyframes slideIn {
                     from {
@@ -910,6 +1057,7 @@ async function handleTextRequest(options: any): Promise<any> {
                 localResourceRoots: []
             }
         );
+        playAlertSound();
 
         // Get current theme
         const currentTheme = vscode.window.activeColorTheme.kind;
@@ -951,6 +1099,7 @@ async function handleConfirmRequest(options: any): Promise<any> {
                 localResourceRoots: []
             }
         );
+        playAlertSound();
 
         // Get current theme
         const currentTheme = vscode.window.activeColorTheme.kind;
@@ -964,6 +1113,9 @@ async function handleConfirmRequest(options: any): Promise<any> {
             message => {
                 if (message.command === 'confirmed') {
                     resolve({ confirmed: message.confirmed });
+                    panel.dispose();
+                } else if (message.command === 'textInput') {
+                    resolve({ value: message.text });
                     panel.dispose();
                 } else if (message.command === 'cancelled') {
                     resolve({ confirmed: false });
@@ -1050,78 +1202,6 @@ async function focusChatView(chatTitle?: string) {
     }
 }
 
-function showNotification(type: string, message: string) {
-    // Play notification sound first
-    playNotificationSound();
-    
-    switch (type) {
-        case 'info':
-            vscode.window.showInformationMessage(message);
-            break;
-        case 'warning':
-            vscode.window.showWarningMessage(message);
-            break;
-        case 'error':
-            vscode.window.showErrorMessage(message);
-            break;
-    }
-}
-
-// Helper function to play notification sound
-function playNotificationSound() {
-    // Create a temporary, minimal webview just to play the sound
-    const tempPanel = vscode.window.createWebviewPanel(
-        'soundPlayer',
-        '',
-        { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
-        {
-            enableScripts: true,
-            retainContextWhenHidden: false,
-            localResourceRoots: []
-        }
-    );
-
-    // Set HTML with just the audio element, minimal and hidden
-    tempPanel.webview.html = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body { 
-                    margin: 0; 
-                    padding: 0; 
-                    background: transparent; 
-                    width: 1px; 
-                    height: 1px; 
-                    overflow: hidden; 
-                }
-            </style>
-        </head>
-        <body>
-            ${createWarmChimeHTML()}
-            <script>
-                // Close the panel after playing sound
-                setTimeout(() => {
-                    const vscode = acquireVsCodeApi();
-                    vscode.postMessage({ command: 'close' });
-                }, 200);
-            </script>
-        </body>
-        </html>
-    `;
-
-    // Handle message to close the panel
-    tempPanel.webview.onDidReceiveMessage(message => {
-        if (message.command === 'close') {
-            tempPanel.dispose();
-        }
-    });
-
-    // Auto-dispose after 300ms as backup
-    setTimeout(() => {
-        tempPanel.dispose();
-    }, 300);
-}
 
 export function deactivate() {
     if (wsClient) {
@@ -1139,10 +1219,45 @@ export function deactivate() {
 function createQuickPingHTML(): string {
     return `
         <script>
-            // Play Quick Ping sound when page loads
-            function playQuickPing() {
+            let audioContext = null;
+            let isAudioUnlocked = false;
+            
+            // Audio unlock mechanism - bypasses autoplay restrictions
+            function unlockAudio() {
+                if (isAudioUnlocked) return;
+                
                 try {
-                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    
+                    // Create a silent sound to unlock the audio context
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.01);
+                    
+                    isAudioUnlocked = true;
+                    console.log('Audio unlocked successfully');
+                    
+                    // Now play the actual chime
+                    setTimeout(playQuickPing, 50);
+                    
+                } catch (e) {
+                    console.log('Audio unlock failed:', e);
+                }
+            }
+            
+            // Play Quick Ping sound
+            function playQuickPing() {
+                if (!isAudioUnlocked || !audioContext) {
+                    return;
+                }
+                
+                try {
                     const oscillator = audioContext.createOscillator();
                     const gainNode = audioContext.createGain();
                     
@@ -1159,62 +1274,139 @@ function createQuickPingHTML(): string {
                     oscillator.start(audioContext.currentTime);
                     oscillator.stop(audioContext.currentTime + 0.15);
                 } catch (e) {
-                    console.log('Audio not supported:', e);
+                    console.log('Audio playback failed:', e);
                 }
             }
             
-            // Play sound when DOM is ready
+            // Simulated user interaction to unlock audio - this is the key!
+            function simulateUserInteraction() {
+                const hiddenButton = document.createElement('button');
+                hiddenButton.style.position = 'absolute';
+                hiddenButton.style.left = '-9999px';
+                hiddenButton.style.opacity = '0';
+                hiddenButton.style.pointerEvents = 'none';
+                
+                document.body.appendChild(hiddenButton);
+                
+                // Simulate click to unlock audio
+                hiddenButton.click();
+                
+                // Clean up
+                document.body.removeChild(hiddenButton);
+                
+                // Now unlock audio with this "user interaction"
+                unlockAudio();
+            }
+            
+            // Alternative: HTML5 Audio fallback (sometimes works when Web Audio API fails)
+            function playAudioFallback() {
+                try {
+                    // Create audio element with chime data URL
+                    const audio = new Audio();
+                    audio.volume = 0.3;
+                    
+                    // Generate a simple beep using data URL
+                    const duration = 0.15;
+                    const sampleRate = 44100;
+                    const frequency = 1000;
+                    const samples = Math.floor(sampleRate * duration);
+                    const buffer = new ArrayBuffer(44 + samples * 2);
+                    const view = new DataView(buffer);
+                    
+                    // WAV header
+                    const writeString = (offset, string) => {
+                        for (let i = 0; i < string.length; i++) {
+                            view.setUint8(offset + i, string.charCodeAt(i));
+                        }
+                    };
+                    
+                    writeString(0, 'RIFF');
+                    view.setUint32(4, 36 + samples * 2, true);
+                    writeString(8, 'WAVE');
+                    writeString(12, 'fmt ');
+                    view.setUint32(16, 16, true);
+                    view.setUint16(20, 1, true);
+                    view.setUint16(22, 1, true);
+                    view.setUint32(24, sampleRate, true);
+                    view.setUint32(28, sampleRate * 2, true);
+                    view.setUint16(32, 2, true);
+                    view.setUint16(34, 16, true);
+                    writeString(36, 'data');
+                    view.setUint32(40, samples * 2, true);
+                    
+                    // Generate audio samples
+                    for (let i = 0; i < samples; i++) {
+                        const t = i / sampleRate;
+                        const envelope = Math.exp(-t * 10); // Exponential decay
+                        const sample = Math.sin(2 * Math.PI * frequency * t) * envelope * 0.3;
+                        view.setInt16(44 + i * 2, sample * 32767, true);
+                    }
+                    
+                    const blob = new Blob([buffer], { type: 'audio/wav' });
+                    audio.src = URL.createObjectURL(blob);
+                    audio.play().catch(() => {
+                        console.log('HTML5 Audio fallback also failed');
+                    });
+                    
+                } catch (e) {
+                    console.log('Audio fallback failed:', e);
+                }
+            }
+            
+            // Multiple fallback strategies to unlock audio
+            function initializeAudio() {
+                // Strategy 1: Try immediate unlock (might work in some contexts)
+                unlockAudio();
+                
+                // Strategy 2: Simulated interaction fallback
+                if (!isAudioUnlocked) {
+                    setTimeout(() => {
+                        simulateUserInteraction();
+                        // Also try HTML5 audio fallback
+                        setTimeout(playAudioFallback, 200);
+                    }, 100);
+                }
+                
+                // Strategy 3: Wait for any actual user interaction
+                function oneTimeUnlock() {
+                    if (!isAudioUnlocked) {
+                        unlockAudio();
+                        // Play the chime now that we have real user interaction
+                        setTimeout(playQuickPing, 50);
+                    }
+                    document.removeEventListener('click', oneTimeUnlock);
+                    document.removeEventListener('keydown', oneTimeUnlock);
+                    document.removeEventListener('touchstart', oneTimeUnlock);
+                }
+                
+                if (!isAudioUnlocked) {
+                    document.addEventListener('click', oneTimeUnlock);
+                    document.addEventListener('keydown', oneTimeUnlock);
+                    document.addEventListener('touchstart', oneTimeUnlock);
+                }
+            }
+            
+            // Initialize when DOM is ready
             if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', playQuickPing);
+                document.addEventListener('DOMContentLoaded', initializeAudio);
             } else {
-                playQuickPing();
+                initializeAudio();
             }
         </script>
     `;
 }
 
-// Helper function to create Warm Chime sound for notifications
-function createWarmChimeHTML(): string {
-    return `
-        <script>
-            // Play Warm Chime sound when page loads
-            function playWarmChime() {
-                try {
-                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    const oscillator1 = audioContext.createOscillator();
-                    const oscillator2 = audioContext.createOscillator();
-                    const gainNode = audioContext.createGain();
-                    
-                    oscillator1.connect(gainNode);
-                    oscillator2.connect(gainNode);
-                    gainNode.connect(audioContext.destination);
-                    
-                    oscillator1.frequency.value = 523; // C5
-                    oscillator2.frequency.value = 659; // E5 (major third)
-                    oscillator1.type = 'sine';
-                    oscillator2.type = 'sine';
-                    
-                    gainNode.gain.setValueAtTime(0, audioContext.currentTime);
-                    gainNode.gain.linearRampToValueAtTime(0.12, audioContext.currentTime + 0.02);
-                    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.6);
-                    
-                    oscillator1.start(audioContext.currentTime);
-                    oscillator2.start(audioContext.currentTime);
-                    oscillator1.stop(audioContext.currentTime + 0.6);
-                    oscillator2.stop(audioContext.currentTime + 0.6);
-                } catch (e) {
-                    console.log('Audio not supported:', e);
-                }
-            }
-            
-            // Play sound when DOM is ready
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', playWarmChime);
-            } else {
-                playWarmChime();
-            }
-        </script>
-    `;
+function playAlertSound() {
+  let command;
+  if (process.platform === 'win32') {
+    command = 'powershell';
+    const args = ['[console]::beep(1000, 150)'];
+    spawn(command, args, { shell: true });
+  } else if (process.platform === 'darwin') {
+    spawn('afplay', ['/System/Library/Sounds/Ping.aiff']);
+  } else {
+    spawn('aplay', ['/usr/share/sounds/alsa/Front_Center.wav']);
+  }
 }
 
 // Generate and copy MCP configuration JSON to clipboard

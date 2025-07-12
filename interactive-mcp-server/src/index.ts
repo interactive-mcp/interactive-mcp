@@ -98,7 +98,7 @@ async function requestUserInput(
 // Tool: Ask user with buttons
 server.tool(
   "ask_user_buttons",
-  "Ask the user to choose from multiple options using buttons",
+  "Ask the user to choose from multiple predefined options using buttons. BEST FOR: Multiple choice questions, menu selections, preference choices. Each option should be distinct and clear. Users can also provide custom text if none of the buttons fit their needs.",
   {
     title: z.string().describe("Title of the popup"),
     message: z.string().describe("Message to display to the user"),
@@ -138,7 +138,7 @@ server.tool(
 // Tool: Ask user for text input
 server.tool(
   "ask_user_text",
-  "Ask the user for text input",
+  "Ask the user for free-form text input. BEST FOR: Open-ended questions, detailed explanations, custom input where you need the user to type their own response. Always provide a clear, specific prompt.",
   {
     title: z.string().describe("Title of the input box"),
     prompt: z.string().describe("Prompt message for the user"),
@@ -177,73 +177,41 @@ server.tool(
 // Tool: Ask user for confirmation
 server.tool(
   "ask_user_confirm",
-  "Ask the user for yes/no confirmation",
+  "Ask the user for a single binary decision with positive/negative outcome. ONLY USE FOR: Single actions that can be confirmed or declined (e.g., 'Save changes?', 'Delete file?', 'Proceed with action?'). DO NOT USE for choosing between two different options - use ask_user_buttons instead. Users can also provide custom text to explain their choice.",
   {
     title: z.string().describe("Title of the confirmation dialog"),
-    message: z.string().describe("Question to ask the user"),
+    message: z.string().describe("Single question about one action that user can confirm or decline"),
+    confirmText: z.string().optional().describe("Text for the positive/confirm button (default: 'Yes')"),
+    cancelText: z.string().optional().describe("Text for the negative/cancel button (default: 'No')"),
   },
-  async ({ title, message }) => {
+  async ({ title, message, confirmText, cancelText }) => {
     try {
       const response = await requestUserInput("confirm", {
         title,
         message,
+        confirmText: confirmText || "Yes",
+        cancelText: cancelText || "No",
       });
-      return {
-        content: [
-          {
-            type: "text",
-            text: `User ${response.confirmed ? "confirmed" : "declined"}`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Tool: Show progress or completion notification
-server.tool(
-  "notify_user",
-  "Show a notification to the user",
-  {
-    type: z.enum(["info", "warning", "error"]).describe("Type of notification"),
-    message: z.string().describe("Message to display"),
-  },
-  async ({ type, message }) => {
-    try {
-      if (!isWebSocketReady || vsCodeClients.size === 0) {
-        throw new Error("VS Code extension is not connected");
+      // Handle both boolean confirmation and custom text responses
+      if (response.value) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `User provided custom response: ${response.value}`,
+            },
+          ],
+        };
+      } else {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `User ${response.confirmed ? "confirmed" : "declined"}`,
+            },
+          ],
+        };
       }
-
-      // Send notification to all connected clients
-      vsCodeClients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(
-            JSON.stringify({
-              type: "notification",
-              notificationType: type,
-              message,
-            })
-          );
-        }
-      });
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Notification sent: ${message}`,
-          },
-        ],
-      };
     } catch (error) {
       return {
         content: [
@@ -256,6 +224,7 @@ server.tool(
     }
   }
 );
+
 
 // Tool: Show notification with button options
 // server.tool(

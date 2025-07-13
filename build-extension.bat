@@ -53,8 +53,8 @@ echo 🔄 Installing VS Code extension dependencies...
 call npm install
 if !errorlevel! neq 0 goto :error
 
-echo 🔄 Bundling MCP server into extension...
-call npm run bundle-server
+echo 🔄 Bundling MCP server and shared router into extension...
+call npm run bundle-all
 if !errorlevel! neq 0 goto :error
 
 echo 🔄 Compiling VS Code extension TypeScript...
@@ -94,8 +94,9 @@ echo ✅ Build process completed successfully!
 echo.
 echo 📋 Summary:
 echo    ✅ MCP Server built
+echo    ✅ Shared Router built
 echo    ✅ VS Code Extension compiled
-echo    ✅ Server bundled into extension
+echo    ✅ Server and Router bundled into extension
 echo    ✅ VSIX package created
 echo.
 echo ⚠️  Note: Manual installation required - automatic installation was skipped

@@ -1,0 +1,9 @@
+{
+  "name": "interactive-mcp-shared-router",
+  "version": "1.0.0",
+  "main": "dist/router.js",
+  "type": "module",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

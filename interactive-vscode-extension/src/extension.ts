@@ -7,13 +7,44 @@ import * as fs from 'fs';
 let wsClient: WebSocket | undefined;
 let statusBarItem: vscode.StatusBarItem;
 let mcpServerProcess: ChildProcess | undefined;
+let routerProcess: ChildProcess | undefined;
 let outputChannel: vscode.OutputChannel;
 let extensionPath: string;
 let chimeToggleItem: vscode.StatusBarItem;
+let workspaceId: string;
+let sessionId: string;
+
+// Logging helper functions
+function logInfo(message: string) {
+    const timestamp = new Date().toISOString();
+    if (outputChannel) {
+        outputChannel.appendLine(`[${timestamp}] INFO: ${message}`);
+    }
+}
+
+function logError(message: string, error?: any) {
+    const timestamp = new Date().toISOString();
+    if (outputChannel) {
+        const errorDetails = error ? ` - ${error.message || error}` : '';
+        outputChannel.appendLine(`[${timestamp}] ERROR: ${message}${errorDetails}`);
+    }
+}
+
+function logDebug(message: string) {
+    const timestamp = new Date().toISOString();
+    if (outputChannel) {
+        outputChannel.appendLine(`[${timestamp}] DEBUG: ${message}`);
+    }
+}
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Interactive MCP Helper is now active!');
-
+    // Initialize logging first
+    outputChannel = vscode.window.createOutputChannel('Interactive MCP');
+    context.subscriptions.push(outputChannel);
+    extensionPath = context.extensionPath;
+    
+    logInfo('Interactive MCP Helper is activating...');
+    
     // Create status bar item
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.text = "$(plug) MCP Disconnected";
@@ -40,7 +71,14 @@ export function activate(context: vscode.ExtensionContext) {
     // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('interactiveMcp.connect', () => {
-            connectToMcpServer(context);
+            // Start router first, then connect
+            startSharedRouter(context).then(() => {
+                connectToMcpServer(context);
+            }).catch(error => {
+                logError('Failed to start shared router', error);
+                // Try to connect anyway in case router is already running
+                connectToMcpServer(context);
+            });
         })
     );
 
@@ -71,20 +109,25 @@ export function activate(context: vscode.ExtensionContext) {
     // Auto-connect if enabled
     const config = vscode.workspace.getConfiguration('interactiveMcp');
     if (config.get<boolean>('autoConnect')) {
-        connectToMcpServer(context);
+        // Start router first, then connect
+        startSharedRouter(context).then(() => {
+            connectToMcpServer(context);
+        }).catch(error => {
+            logError('Failed to start shared router', error);
+            // Try to connect anyway in case router is already running
+            connectToMcpServer(context);
+        });
     }
 
     // Show installation notification with MCP config option
     showInstallationWelcome(context);
-
-    outputChannel = vscode.window.createOutputChannel('Interactive MCP');
-    context.subscriptions.push(outputChannel);
-    extensionPath = context.extensionPath;
+    
+    logInfo('Interactive MCP Helper activation complete');
 }
 
 async function startLocalMcpServer(context: vscode.ExtensionContext): Promise<boolean> {
     if (mcpServerProcess) {
-        console.log('MCP server already running in this instance');
+        logInfo('MCP server already running in this instance');
         return true;
     }
 
@@ -98,7 +141,7 @@ async function startLocalMcpServer(context: vscode.ExtensionContext): Promise<bo
         
         return new Promise((resolve) => {
             testSocket.on('open', () => {
-                console.log(`MCP server already running on port ${port} (started by another instance)`);
+                logInfo(`MCP server already running on port ${port} (started by another instance)`);
                 testSocket.close();
                 resolve(true);
             });
@@ -124,7 +167,7 @@ async function startNewServer(context: vscode.ExtensionContext): Promise<boolean
             return false;
         }
 
-        console.log('Starting MCP server at:', serverPath);
+        logInfo('Starting MCP server at: ' + serverPath);
         
         mcpServerProcess = spawn('node', [serverPath], {
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -132,20 +175,20 @@ async function startNewServer(context: vscode.ExtensionContext): Promise<boolean
         });
 
         mcpServerProcess.stdout?.on('data', (data) => {
-            console.log('MCP Server:', data.toString());
+            logDebug('MCP Server stdout: ' + data.toString().trim());
         });
 
         mcpServerProcess.stderr?.on('data', (data) => {
-            console.error('MCP Server Error:', data.toString());
+            logError('MCP Server stderr: ' + data.toString().trim());
         });
 
         mcpServerProcess.on('close', (code) => {
-            console.log(`MCP server exited with code ${code}`);
+            logInfo(`MCP server exited with code ${code}`);
             mcpServerProcess = undefined;
         });
 
         mcpServerProcess.on('error', (error) => {
-            console.error('Failed to start MCP server:', error);
+            logError('Failed to start MCP server', error);
             mcpServerProcess = undefined;
             vscode.window.showErrorMessage(`Failed to start MCP server: ${error.message}`);
         });
@@ -155,7 +198,7 @@ async function startNewServer(context: vscode.ExtensionContext): Promise<boolean
         
         return mcpServerProcess !== undefined;
     } catch (error) {
-        console.error('Error starting MCP server:', error);
+        logError('Error starting MCP server', error);
         vscode.window.showErrorMessage(`Error starting MCP server: ${error instanceof Error ? error.message : 'Unknown error'}`);
         return false;
     }
@@ -165,7 +208,7 @@ function stopLocalMcpServer() {
     if (mcpServerProcess) {
         mcpServerProcess.kill();
         mcpServerProcess = undefined;
-        console.log('MCP server stopped');
+        logInfo('MCP server stopped');
     }
 }
 
@@ -180,7 +223,7 @@ function getServerPath(context: vscode.ExtensionContext): string | null {
             return bundledServerPath;
         }
     } catch (error) {
-        console.error('Error checking bundled server:', error);
+        logError('Error checking bundled server', error);
     }
 
     // Check custom server path from settings
@@ -193,52 +236,196 @@ function getServerPath(context: vscode.ExtensionContext): string | null {
     return null;
 }
 
-async function connectToMcpServer(context: vscode.ExtensionContext) {
+async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: number = 0) {
     const config = vscode.workspace.getConfiguration('interactiveMcp');
     const port = config.get<number>('serverPort') || 8547;
     const autoStartServer = config.get<boolean>('autoStartServer');
+    const maxRetries = 3;
+
+    logInfo(`Connection attempt ${retryCount + 1}/${maxRetries + 1} to shared router on port ${port}`);
+    
+    // Update status bar to show connection attempt
+    statusBarItem.text = "$(sync~spin) MCP Connecting...";
+    statusBarItem.tooltip = `Connecting to router (attempt ${retryCount + 1}/${maxRetries + 1})`;
 
     if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-        vscode.window.showInformationMessage('Already connected to MCP server');
+        logInfo('Already connected to MCP server');
+        statusBarItem.text = "$(check) MCP Connected";
+        statusBarItem.tooltip = "Connected to shared router";
         return;
     }
 
-    // Try to start local server if auto-start is enabled (but don't block on failure)
+    // Try to start shared router if auto-start is enabled
     if (autoStartServer) {
-        await startLocalMcpServer(context);
-        // Continue regardless of whether server started - it might already be running
+        statusBarItem.text = "$(sync~spin) Starting Router...";
+        statusBarItem.tooltip = "Starting shared router";
+        
+        const routerStarted = await startSharedRouter(context);
+        logInfo(`Router startup result: ${routerStarted ? 'success' : 'failed/already running'}`);
+        
+        if (!routerStarted) {
+            statusBarItem.text = "$(error) Router Failed";
+            statusBarItem.tooltip = "Router startup failed - click to retry";
+            statusBarItem.command = 'interactiveMcp.connect';
+            vscode.window.showErrorMessage('Failed to start router. Please check the output for details.');
+            return;
+        }
     }
 
-    wsClient = new WebSocket(`ws://localhost:${port}`);
+    logInfo(`🔌 Creating WebSocket connection to ws://localhost:${port}`);
+    
+    try {
+        wsClient = new WebSocket(`ws://localhost:${port}`);
+        logInfo('📡 WebSocket client created, waiting for connection...');
+    } catch (error) {
+        logError('❌ Failed to create WebSocket client', error);
+        statusBarItem.text = "$(error) MCP Failed";
+        statusBarItem.tooltip = "Failed to create WebSocket - click to retry";
+        statusBarItem.command = 'interactiveMcp.connect';
+        return;
+    }
 
     wsClient.on('open', () => {
-        console.log('Connected to MCP server');
+        logInfo('🔗 WebSocket connection established with shared router');
+        
+        // Register with shared router
+        workspaceId = getWorkspaceId(context);
+        sessionId = `vscode-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        logInfo(`📝 Registering VS Code extension with router`);
+        logInfo(`   WorkspaceId: ${workspaceId}`);
+        logInfo(`   SessionId: ${sessionId}`);
+        
+        try {
+            wsClient!.send(JSON.stringify({
+                type: 'register',
+                clientType: 'vscode-extension',
+                workspaceId,
+                sessionId
+            }));
+            logInfo('📤 Registration message sent to router');
+        } catch (error) {
+            logError('❌ Failed to send registration message', error);
+            return;
+        }
+        
         statusBarItem.text = "$(check) MCP Connected";
-        statusBarItem.tooltip = "Connected to MCP server (click to disconnect)";
+        statusBarItem.tooltip = `Connected to shared router on port ${port} (click to disconnect)`;
         statusBarItem.command = 'interactiveMcp.disconnect';
-        vscode.window.showInformationMessage('Connected to Interactive MCP server');
+        logInfo('✅ VS Code extension successfully connected to shared router');
+        
+        // Show success message only on first connection or after failures
+        if (retryCount > 0) {
+            vscode.window.showInformationMessage('Successfully reconnected to Interactive MCP router');
+        } else {
+            vscode.window.showInformationMessage('Connected to Interactive MCP router');
+        }
     });
 
     wsClient.on('message', async (data: WebSocket.Data) => {
         try {
             const message = JSON.parse(data.toString());
+            
+            if (message.type === 'register') {
+                logInfo('✅ Registration confirmed by router');
+            } else if (message.type === 'heartbeat') {
+                logDebug('💓 Heartbeat received from router');
+            } else if (message.type === 'workspace-sync-complete') {
+                handleWorkspaceSyncComplete(message);
+            } else {
+                logInfo(`📥 Received ${message.type} message from router`);
+            }
+            
             await handleMcpRequest(message);
         } catch (error) {
-            console.error('Error handling message:', error);
+            logError('❌ Error handling message from router', error);
         }
     });
 
-    wsClient.on('close', () => {
-        console.log('Disconnected from MCP server');
-        statusBarItem.text = "$(plug) MCP Disconnected";
-        statusBarItem.tooltip = "Click to connect to MCP server";
+    wsClient.on('close', (code, reason) => {
+        logInfo(`WebSocket disconnected from shared router (code: ${code}, reason: ${reason || 'unknown'})`);
+        
+        // Clear the wsClient reference
+        wsClient = undefined;
+        
+        // Determine disconnection type and update status accordingly
+        const isNormalClosure = code === 1000;
+        const isGoingAway = code === 1001;
+        
+        if (isNormalClosure || isGoingAway) {
+            // Normal disconnection
+            statusBarItem.text = "$(plug) MCP Disconnected";
+            statusBarItem.tooltip = "Disconnected normally - click to reconnect";
+            logInfo('Normal disconnection from router');
+        } else {
+            // Unexpected disconnection
+            statusBarItem.text = "$(warning) MCP Lost Connection";
+            statusBarItem.tooltip = `Connection lost (code: ${code}) - click to reconnect`;
+            
+            vscode.window.showWarningMessage(
+                `Lost connection to Interactive MCP router (code: ${code})`,
+                'Reconnect'
+            ).then(action => {
+                if (action === 'Reconnect') {
+                    setTimeout(() => connectToMcpServer(context, 0), 500);
+                }
+            });
+            
+            // Auto-reconnect for unexpected disconnections if auto-connect is enabled
+            const config = vscode.workspace.getConfiguration('interactiveMcp');
+            if (config.get<boolean>('autoConnect') && retryCount === 0) {
+                logInfo('Attempting automatic reconnection in 3 seconds...');
+                statusBarItem.text = "$(sync~spin) MCP Reconnecting...";
+                statusBarItem.tooltip = "Automatically reconnecting...";
+                setTimeout(() => {
+                    connectToMcpServer(context, 0);
+                }, 3000);
+                return;
+            }
+        }
+        
         statusBarItem.command = 'interactiveMcp.connect';
-        vscode.window.showWarningMessage('Disconnected from Interactive MCP server');
     });
 
     wsClient.on('error', (error: Error) => {
-        console.error('WebSocket error:', error);
-        vscode.window.showErrorMessage(`MCP connection error: ${error.message}`);
+        logError('WebSocket connection error', error);
+        
+        // Add retry logic
+        if (retryCount < maxRetries) {
+            const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000); // Exponential backoff, max 5s
+            logInfo(`Connection failed, retrying in ${retryDelay}ms (attempt ${retryCount + 1}/${maxRetries})`);
+            
+            setTimeout(() => {
+                connectToMcpServer(context, retryCount + 1);
+            }, retryDelay);
+        } else {
+            logError('Max connection retries exceeded');
+            
+            // Show detailed error message with troubleshooting steps
+            const troubleshootAction = 'Troubleshoot';
+            const retryAction = 'Retry';
+            vscode.window.showErrorMessage(
+                `MCP connection failed after ${maxRetries + 1} attempts. ${error.message || 'Unknown connection error'}`,
+                troubleshootAction,
+                retryAction
+            ).then(action => {
+                if (action === troubleshootAction) {
+                    // Show troubleshooting information
+                    vscode.window.showInformationMessage(
+                        'Troubleshooting: 1) Check if another application is using port ' + port + 
+                        ', 2) Restart VS Code, 3) Check the "Interactive MCP" output panel for detailed logs'
+                    );
+                } else if (action === retryAction) {
+                    // Retry connection
+                    setTimeout(() => connectToMcpServer(context, 0), 1000);
+                }
+            });
+            
+            // Update status bar to show failed state
+            statusBarItem.text = "$(error) MCP Failed";
+            statusBarItem.tooltip = `Connection failed after ${maxRetries + 1} attempts - click to retry`;
+            statusBarItem.command = 'interactiveMcp.connect';
+        }
     });
 }
 
@@ -247,6 +434,20 @@ function disconnectFromMcpServer() {
         wsClient.close();
         wsClient = undefined;
     }
+}
+
+function handleWorkspaceSyncComplete(message: any) {
+    const { finalWorkspace, mcpSessionId, vscodeSessionId } = message;
+    
+    logInfo(`🎉 Workspace coordination complete! Final workspace: ${finalWorkspace}`);
+    logInfo(`🔗 Now paired with MCP server session: ${mcpSessionId}`);
+    
+    // Update our workspace ID if needed
+    workspaceId = finalWorkspace;
+    
+    // Update status bar to show successful pairing
+    statusBarItem.text = "$(check) MCP Paired";
+    statusBarItem.tooltip = `Paired with MCP server - Workspace: ${finalWorkspace}`;
 }
 
 async function handleMcpRequest(message: any) {
@@ -265,7 +466,7 @@ async function handleMcpRequest(message: any) {
                 break;
 
             default:
-                console.error('Unknown input type:', message.inputType);
+                logError('Unknown input type: ' + message.inputType);
                 return;
         }
 
@@ -1159,8 +1360,11 @@ export function deactivate() {
         statusBarItem.dispose();
     }
     
-    // Clean up the MCP server process
-    stopLocalMcpServer();
+    // Clean up the shared router process
+    if (routerProcess) {
+        routerProcess.kill();
+        routerProcess = undefined;
+    }
 }
 
 
@@ -1232,7 +1436,7 @@ async function copyMcpConfiguration(context: vscode.ExtensionContext, fromComman
         return true;
 
     } catch (error) {
-        console.error('Error generating MCP config:', error);
+        logError('Error generating MCP config', error);
         vscode.window.showErrorMessage(`Failed to generate MCP configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
         return false;
     }
@@ -1275,3 +1479,360 @@ async function showWelcomeNotification(context: vscode.ExtensionContext, hasCopi
 }
 
  
+
+// Get workspace identifier for shared router registration
+function getWorkspaceId(context: vscode.ExtensionContext): string {
+    // Try to get workspace folder path
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        // Use first workspace folder for multi-root workspaces
+        return path.resolve(vscode.workspace.workspaceFolders[0].uri.fsPath);
+    }
+    
+    // Try workspace file if available
+    if (vscode.workspace.workspaceFile) {
+        return path.resolve(vscode.workspace.workspaceFile.fsPath);
+    }
+    
+    // Fallback to extension path (this shouldnt happen in normal usage)
+    return path.resolve(context.extensionPath);
+}
+
+// Start shared router with smart port conflict resolution
+async function startSharedRouter(context: vscode.ExtensionContext): Promise<boolean> {
+    logInfo('Starting shared router with smart port management...');
+    
+    if (routerProcess) {
+        logInfo("Router process already running in this instance");
+        return true;
+    }
+
+    const config = vscode.workspace.getConfiguration("interactiveMcp");
+    const port = config.get<number>("serverPort") || 8547;
+    
+    logInfo(`Checking port ${port} status...`);
+    
+    // Step 1: Check if something is using the port
+    const processInfo = await getProcessUsingPort(port);
+    
+    if (processInfo) {
+        logInfo(`Port ${port} is occupied by PID ${processInfo.pid}`);
+        
+        // Step 2: Test if it's our router
+        const isOurRouter = await testIfOurRouter(port);
+        
+        if (isOurRouter) {
+            logInfo(`Port ${port} has our router running - using existing instance`);
+            return true;
+        } else {
+            logInfo(`Port ${port} has foreign process - attempting to terminate PID ${processInfo.pid}`);
+            const killed = await killProcess(processInfo.pid);
+            
+            if (killed) {
+                logInfo(`Successfully terminated PID ${processInfo.pid}`);
+                // Wait a moment for port to be freed
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } else {
+                logError(`Failed to terminate PID ${processInfo.pid}`);
+                vscode.window.showErrorMessage(`Port ${port} is occupied and cannot be freed. Please close the application using this port.`);
+                return false;
+            }
+        }
+    } else {
+        logInfo(`Port ${port} is free`);
+    }
+    
+    // Step 3: Start new router
+    return await startNewRouter(context, port);
+}
+
+// Start new router instance
+async function startNewRouter(context: vscode.ExtensionContext, port: number): Promise<boolean> {
+    try {
+        logInfo('Starting new router instance...');
+        const routerPath = getRouterPath(context);
+        
+        if (!routerPath) {
+            logError("Router executable not found");
+            vscode.window.showErrorMessage("Router not found. Please ensure the extension is properly installed.");
+            return false;
+        }
+
+        logInfo(`Launching router: ${routerPath}`);
+        
+        // Test if basic process spawning works
+        logInfo(`🧪 Testing basic process spawning first...`);
+        const testProcess = spawn("node", ["-e", "console.log('TEST OUTPUT'); console.error('TEST ERROR');"], {
+            stdio: ["pipe", "pipe", "pipe"]
+        });
+        
+        testProcess.stdout?.on("data", (data) => {
+            logInfo(`🧪 Test STDOUT: ${data.toString().trim()}`);
+        });
+        
+        testProcess.stderr?.on("data", (data) => {
+            logInfo(`🧪 Test STDERR: ${data.toString().trim()}`);
+        });
+        
+        testProcess.on("close", (code) => {
+            logInfo(`🧪 Test process exited with code ${code}`);
+        });
+        
+        // Now start the actual router
+        logInfo(`🚀 Starting actual router process...`);
+        routerProcess = spawn("node", [routerPath], {
+            stdio: ["pipe", "pipe", "pipe"],
+            env: { ...process.env, NODE_ENV: "production", PORT: port.toString() }
+        });
+
+        routerProcess.stdout?.on("data", (data) => {
+            const output = data.toString().trim();
+            logInfo("Router STDOUT: " + output);
+            
+            // Check for specific router startup messages
+            if (output.includes("WebSocket router listening")) {
+                logInfo("✅ Router successfully started and listening for connections");
+            } else if (output.includes("Starting as main module")) {
+                logInfo("🚀 Router module initialization detected");
+            }
+        });
+
+        routerProcess.stderr?.on("data", (data) => {
+            const output = data.toString().trim();
+            logError("Router STDERR: " + output);
+            
+            // Check for specific error patterns
+            if (output.includes("EADDRINUSE")) {
+                logError("❌ Port conflict detected in router stderr");
+            }
+        });
+
+        routerProcess.on("close", (code) => {
+            logInfo(`Router exited with code ${code}`);
+            routerProcess = undefined;
+        });
+
+        routerProcess.on("error", (error) => {
+            logError("Failed to start router", error);
+            routerProcess = undefined;
+        });
+
+        // Wait for startup and verify
+        logInfo('⏳ Waiting 2 seconds for router to start...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        if (routerProcess) {
+            logInfo(`🔍 Testing router connection on port ${port}...`);
+            const isListening = await testRouterConnection(port);
+            
+            if (isListening) {
+                logInfo(`✅ Router successfully started and responding on port ${port}`);
+                const workspaceId = getWorkspaceId(context);
+                logInfo(`📁 Workspace: ${workspaceId}`);
+                logInfo(`🎯 Router startup complete - ready for connections`);
+                return true;
+            } else {
+                logError('❌ Router process running but not responding to connections');
+                logInfo('💀 Terminating unresponsive router process');
+                if (routerProcess) {
+                    routerProcess.kill();
+                    routerProcess = undefined;
+                }
+            }
+        } else {
+            logError('❌ Router process terminated unexpectedly during startup');
+        }
+        
+        return false;
+    } catch (error) {
+        logError("Error starting router", error);
+        return false;
+    }
+}
+
+// Check what process is using a port
+async function getProcessUsingPort(port: number): Promise<{ pid: number; command: string } | null> {
+    return new Promise((resolve) => {
+        // Try different commands based on platform
+        const isWindows = process.platform === 'win32';
+        const command = isWindows 
+            ? `netstat -ano | findstr :${port}` 
+            : `lsof -ti:${port} 2>/dev/null || ss -tlnp | grep :${port}`;
+        
+        const { spawn } = require('child_process');
+        const proc = spawn('sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'] });
+        
+        let output = '';
+        proc.stdout.on('data', (data: Buffer) => {
+            output += data.toString();
+        });
+        
+        proc.on('close', () => {
+            if (!output.trim()) {
+                resolve(null);
+                return;
+            }
+            
+            try {
+                if (isWindows) {
+                    // Parse Windows netstat output
+                    const lines = output.split('\n').filter(line => line.includes(`:${port}`));
+                    if (lines.length > 0) {
+                        const parts = lines[0].trim().split(/\s+/);
+                        const pid = parseInt(parts[parts.length - 1]);
+                        if (!isNaN(pid)) {
+                            resolve({ pid, command: 'unknown' });
+                            return;
+                        }
+                    }
+                } else {
+                    // Parse Unix lsof/ss output
+                    const pid = parseInt(output.trim().split('\n')[0]);
+                    if (!isNaN(pid)) {
+                        resolve({ pid, command: 'unknown' });
+                        return;
+                    }
+                }
+            } catch (error) {
+                logDebug('Error parsing port check output: ' + error);
+            }
+            
+            resolve(null);
+        });
+        
+        proc.on('error', () => resolve(null));
+    });
+}
+
+// Kill a process by PID
+async function killProcess(pid: number): Promise<boolean> {
+    return new Promise((resolve) => {
+        const isWindows = process.platform === 'win32';
+        const command = isWindows ? `taskkill /F /PID ${pid}` : `kill -9 ${pid}`;
+        
+        const { spawn } = require('child_process');
+        const proc = spawn('sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'] });
+        
+        proc.on('close', (code: number | null) => {
+            resolve(code === 0);
+        });
+        
+        proc.on('error', () => resolve(false));
+    });
+}
+
+// Test if an existing WebSocket server is our router
+async function testIfOurRouter(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+        try {
+            const testSocket = new (require("ws"))(`ws://localhost:${port}`);
+            let resolved = false;
+            
+            const cleanup = () => {
+                if (!resolved) {
+                    resolved = true;
+                    testSocket.removeAllListeners();
+                    if (testSocket.readyState === WebSocket.OPEN) {
+                        testSocket.close();
+                    }
+                }
+            };
+            
+            testSocket.on("open", () => {
+                // Send heartbeat to test if it's our router
+                testSocket.send(JSON.stringify({ type: 'heartbeat' }));
+            });
+            
+            testSocket.on("message", (data: Buffer) => {
+                try {
+                    const message = JSON.parse(data.toString());
+                    // If it responds to heartbeat, it's likely our router
+                    if (message.type === 'heartbeat') {
+                        logDebug(`Port ${port} has our router responding to heartbeat`);
+                        cleanup();
+                        resolve(true);
+                    }
+                } catch (error) {
+                    // Invalid JSON response, not our router
+                    cleanup();
+                    resolve(false);
+                }
+            });
+            
+            testSocket.on("error", () => {
+                cleanup();
+                resolve(false);
+            });
+            
+            // Timeout after 3 seconds
+            setTimeout(() => {
+                if (!resolved) {
+                    logDebug(`Port ${port} connection test timed out`);
+                    cleanup();
+                    resolve(false);
+                }
+            }, 3000);
+        } catch (error) {
+            resolve(false);
+        }
+    });
+}
+
+// Test if router is actually listening on the expected port
+async function testRouterConnection(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+        try {
+            const testSocket = new (require("ws"))(`ws://localhost:${port}`);
+            let resolved = false;
+            
+            const cleanup = () => {
+                if (!resolved) {
+                    resolved = true;
+                    testSocket.removeAllListeners();
+                    if (testSocket.readyState === WebSocket.OPEN) {
+                        testSocket.close();
+                    }
+                }
+            };
+            
+            testSocket.on("open", () => {
+                logDebug(`Router connection test successful on port ${port}`);
+                cleanup();
+                resolve(true);
+            });
+            
+            testSocket.on("error", (error: Error) => {
+                logDebug(`Router connection test failed on port ${port}: ${error.message}`);
+                cleanup();
+                resolve(false);
+            });
+            
+            // Timeout after 2 seconds
+            setTimeout(() => {
+                if (!resolved) {
+                    logDebug(`Router connection test timed out on port ${port}`);
+                    cleanup();
+                    resolve(false);
+                }
+            }, 2000);
+        } catch (error) {
+            logError('Error testing router connection', error);
+            resolve(false);
+        }
+    });
+}
+
+// Get router executable path
+function getRouterPath(context: vscode.ExtensionContext): string | null {
+    // Try bundled router first
+    const bundledRouterPath = path.join(context.extensionPath, "bundled-router", "dist", "router.js");
+    
+    try {
+        if (fs.existsSync(bundledRouterPath)) {
+            return bundledRouterPath;
+        }
+    } catch (error) {
+        logError('Error checking bundled router', error);
+    }
+
+    return null;
+}

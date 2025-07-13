@@ -41,13 +41,13 @@
   "contributes": {
     "commands": [
       {
-        "command": "interactiveMcp.connect",
-        "title": "Connect to MCP Server",
+        "command": "interactiveMcp.enable",
+        "title": "Enable Tools",
         "category": "Interactive MCP"
       },
       {
-        "command": "interactiveMcp.disconnect", 
-        "title": "Disconnect from MCP Server",
+        "command": "interactiveMcp.disable", 
+        "title": "Disable Tools",
         "category": "Interactive MCP"
       },
       {

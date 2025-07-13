@@ -277,8 +277,6 @@ async function handleMcpRequest(message: any) {
                 response: response
             }));
         }
-    } else if (message.type === 'command') {
-        handleCommand(message.command, message.options);
     }
 }
 
@@ -567,7 +565,6 @@ function createButtonDialogHTML(options: any, isDark: boolean): string {
             </div>
         </div>
 
-        ${createQuickPingHTML()}
         <script>
             const vscode = acquireVsCodeApi();
             
@@ -823,7 +820,6 @@ function createConfirmHTML(options: any, isDark: boolean): string {
                     </button>
                 </div>
             </div>
-            ${createQuickPingHTML()}
             <script>
                 const vscode = acquireVsCodeApi();
                 
@@ -1031,7 +1027,6 @@ function createTextInputHTML(options: any, isDark: boolean): string {
                     <button class="submit-btn" onclick="sendSubmit()">Submit</button>
                 </div>
             </div>
-            ${createQuickPingHTML()}
             <script>
                 const vscode = acquireVsCodeApi();
                 const input = document.getElementById('textInput');
@@ -1154,76 +1149,6 @@ async function handleConfirmRequest(options: any): Promise<any> {
     });
 }
 
-async function handleCommand(command: string, options: any) {
-    switch (command) {
-        case 'focus_chat':
-            await focusChatView(options.chatTitle);
-            break;
-        default:
-            console.error('Unknown command:', command);
-    }
-}
-
-async function focusChatView(chatTitle?: string) {
-    try {
-        // Get all available commands
-        const commands = await vscode.commands.getCommands();
-        
-        // Look for chat-related focus commands
-        const chatFocusCommands = commands.filter(cmd => 
-            cmd.includes('focus') && cmd.includes('chat') ||
-            cmd.includes('Focus on Chat View') ||
-            cmd.includes('chat') && cmd.includes('view')
-        );
-        
-        console.log('Available chat focus commands:', chatFocusCommands);
-        
-        // Try to find the specific command pattern you mentioned
-        let targetCommand = null;
-        
-        if (chatTitle) {
-            // Look for a command that includes the chat title
-            targetCommand = commands.find(cmd => cmd.includes(chatTitle));
-        }
-        
-        if (!targetCommand) {
-            // Fallback to generic chat focus commands
-            const possibleCommands = [
-                'workbench.action.chat.focus',
-                'workbench.view.chat',
-                'workbench.panel.chat.focus',
-                'chat.focus',
-                'claude.focusChat',
-                'cursor.focusChat'
-            ];
-            
-            for (const cmd of possibleCommands) {
-                if (commands.includes(cmd)) {
-                    targetCommand = cmd;
-                    break;
-                }
-            }
-        }
-        
-        if (targetCommand) {
-            await vscode.commands.executeCommand(targetCommand);
-            console.log(`Executed focus command: ${targetCommand}`);
-        } else {
-            // Fallback: try to focus on the chat panel or sidebar
-            await vscode.commands.executeCommand('workbench.action.focusSideBar');
-            console.log('Fallback: focused on sidebar');
-        }
-        
-    } catch (error) {
-        console.error('Error focusing chat view:', error);
-        // Final fallback - show a notification
-        vscode.window.showInformationMessage(
-            chatTitle ? 
-                `💬 Please focus on chat: "${chatTitle}"` : 
-                '💬 Please return to the chat view'
-        );
-    }
-}
 
 
 export function deactivate() {
@@ -1238,186 +1163,6 @@ export function deactivate() {
     stopLocalMcpServer();
 }
 
-// Helper function to create Quick Ping sound for interactive dialogs
-function createQuickPingHTML(): string {
-    return `
-        <script>
-            let audioContext = null;
-            let isAudioUnlocked = false;
-            
-            // Audio unlock mechanism - bypasses autoplay restrictions
-            function unlockAudio() {
-                if (isAudioUnlocked) return;
-                
-                try {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    
-                    // Create a silent sound to unlock the audio context
-                    const oscillator = audioContext.createOscillator();
-                    const gainNode = audioContext.createGain();
-                    
-                    oscillator.connect(gainNode);
-                    gainNode.connect(audioContext.destination);
-                    
-                    gainNode.gain.setValueAtTime(0, audioContext.currentTime);
-                    oscillator.start(audioContext.currentTime);
-                    oscillator.stop(audioContext.currentTime + 0.01);
-                    
-                    isAudioUnlocked = true;
-                    console.log('Audio unlocked successfully');
-                    
-                    // Now play the actual chime
-                    setTimeout(playQuickPing, 50);
-                    
-                } catch (e) {
-                    console.log('Audio unlock failed:', e);
-                }
-            }
-            
-            // Play Quick Ping sound
-            function playQuickPing() {
-                if (!isAudioUnlocked || !audioContext) {
-                    return;
-                }
-                
-                try {
-                    const oscillator = audioContext.createOscillator();
-                    const gainNode = audioContext.createGain();
-                    
-                    oscillator.connect(gainNode);
-                    gainNode.connect(audioContext.destination);
-                    
-                    oscillator.frequency.value = 1000; // Quick ping frequency
-                    oscillator.type = 'sine';
-                    
-                    gainNode.gain.setValueAtTime(0, audioContext.currentTime);
-                    gainNode.gain.linearRampToValueAtTime(0.15, audioContext.currentTime + 0.005);
-                    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.15);
-                    
-                    oscillator.start(audioContext.currentTime);
-                    oscillator.stop(audioContext.currentTime + 0.15);
-                } catch (e) {
-                    console.log('Audio playback failed:', e);
-                }
-            }
-            
-            // Simulated user interaction to unlock audio - this is the key!
-            function simulateUserInteraction() {
-                const hiddenButton = document.createElement('button');
-                hiddenButton.style.position = 'absolute';
-                hiddenButton.style.left = '-9999px';
-                hiddenButton.style.opacity = '0';
-                hiddenButton.style.pointerEvents = 'none';
-                
-                document.body.appendChild(hiddenButton);
-                
-                // Simulate click to unlock audio
-                hiddenButton.click();
-                
-                // Clean up
-                document.body.removeChild(hiddenButton);
-                
-                // Now unlock audio with this "user interaction"
-                unlockAudio();
-            }
-            
-            // Alternative: HTML5 Audio fallback (sometimes works when Web Audio API fails)
-            function playAudioFallback() {
-                try {
-                    // Create audio element with chime data URL
-                    const audio = new Audio();
-                    audio.volume = 0.3;
-                    
-                    // Generate a simple beep using data URL
-                    const duration = 0.15;
-                    const sampleRate = 44100;
-                    const frequency = 1000;
-                    const samples = Math.floor(sampleRate * duration);
-                    const buffer = new ArrayBuffer(44 + samples * 2);
-                    const view = new DataView(buffer);
-                    
-                    // WAV header
-                    const writeString = (offset, string) => {
-                        for (let i = 0; i < string.length; i++) {
-                            view.setUint8(offset + i, string.charCodeAt(i));
-                        }
-                    };
-                    
-                    writeString(0, 'RIFF');
-                    view.setUint32(4, 36 + samples * 2, true);
-                    writeString(8, 'WAVE');
-                    writeString(12, 'fmt ');
-                    view.setUint32(16, 16, true);
-                    view.setUint16(20, 1, true);
-                    view.setUint16(22, 1, true);
-                    view.setUint32(24, sampleRate, true);
-                    view.setUint32(28, sampleRate * 2, true);
-                    view.setUint16(32, 2, true);
-                    view.setUint16(34, 16, true);
-                    writeString(36, 'data');
-                    view.setUint32(40, samples * 2, true);
-                    
-                    // Generate audio samples
-                    for (let i = 0; i < samples; i++) {
-                        const t = i / sampleRate;
-                        const envelope = Math.exp(-t * 10); // Exponential decay
-                        const sample = Math.sin(2 * Math.PI * frequency * t) * envelope * 0.3;
-                        view.setInt16(44 + i * 2, sample * 32767, true);
-                    }
-                    
-                    const blob = new Blob([buffer], { type: 'audio/wav' });
-                    audio.src = URL.createObjectURL(blob);
-                    audio.play().catch(() => {
-                        console.log('HTML5 Audio fallback also failed');
-                    });
-                    
-                } catch (e) {
-                    console.log('Audio fallback failed:', e);
-                }
-            }
-            
-            // Multiple fallback strategies to unlock audio
-            function initializeAudio() {
-                // Strategy 1: Try immediate unlock (might work in some contexts)
-                unlockAudio();
-                
-                // Strategy 2: Simulated interaction fallback
-                if (!isAudioUnlocked) {
-                    setTimeout(() => {
-                        simulateUserInteraction();
-                        // Also try HTML5 audio fallback
-                        setTimeout(playAudioFallback, 200);
-                    }, 100);
-                }
-                
-                // Strategy 3: Wait for any actual user interaction
-                function oneTimeUnlock() {
-                    if (!isAudioUnlocked) {
-                        unlockAudio();
-                        // Play the chime now that we have real user interaction
-                        setTimeout(playQuickPing, 50);
-                    }
-                    document.removeEventListener('click', oneTimeUnlock);
-                    document.removeEventListener('keydown', oneTimeUnlock);
-                    document.removeEventListener('touchstart', oneTimeUnlock);
-                }
-                
-                if (!isAudioUnlocked) {
-                    document.addEventListener('click', oneTimeUnlock);
-                    document.addEventListener('keydown', oneTimeUnlock);
-                    document.addEventListener('touchstart', oneTimeUnlock);
-                }
-            }
-            
-            // Initialize when DOM is ready
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', initializeAudio);
-            } else {
-                initializeAudio();
-            }
-        </script>
-    `;
-}
 
 function playAlertSound() {
   const config = vscode.workspace.getConfiguration('interactiveMcp');
@@ -1456,7 +1201,7 @@ function playAlertSound() {
 function updateChimeToggle() {
   const config = vscode.workspace.getConfiguration('interactiveMcp');
   const enabled = config.get<boolean>('chimeEnabled', true);
-  chimeToggleItem.text = enabled ? '$(unmute)' : '$(mute)';
+  chimeToggleItem.text = enabled ? '$(music)' : '$(mute)';
   chimeToggleItem.tooltip = enabled ? 'Chime Enabled (click to disable)' : 'Chime Disabled (click to enable)';
 }
 

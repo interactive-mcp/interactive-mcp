@@ -90,4 +90,5 @@ interactive-vscode-extension/bundled-server/
 test-*.html
 
 *.md
+!README.md
 settings.local.json

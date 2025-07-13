@@ -226,48 +226,6 @@ server.tool(
 );
 
 
-// Tool: Show notification with button options
-// server.tool(
-//   "notify_user_with_buttons",
-//   "Show a notification to the user with button options",
-//   {
-//     type: z.enum(["info", "warning", "error"]).describe("Type of notification"),
-//     title: z.string().describe("Title of the notification"),
-//     message: z.string().describe("Message to display"),
-//     options: z.array(z.object({
-//       label: z.string().describe("Button label"),
-//       value: z.string().describe("Value returned when button is clicked"),
-//     })).describe("Array of button options"),
-//   },
-//   async ({ type, title, message, options }) => {
-//     try {
-//       const response = await requestUserInput("notification_buttons", {
-//         type,
-//         title,
-//         message,
-//         options,
-//       });
-//       return {
-//         content: [
-//           {
-//             type: "text",
-//             text: `User selected: ${response.value}`,
-//           },
-//         ],
-//       };
-//     } catch (error) {
-//       return {
-//         content: [
-//           {
-//             type: "text",
-//             text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-//           },
-//         ],
-//       };
-//     }
-//   }
-// );
-
 // Start the server
 async function main() {
   const transport = new StdioServerTransport();

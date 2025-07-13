@@ -1,10 +1,10 @@
 # Interactive MCP
 
-Transform your AI conversations with seamless interactive prompts directly in VS Code, Cursor, Windsurf, and other VS Code-based editors. Never lose your flow when Claude needs user input!
+Transform your AI conversations with seamless interactive prompts directly in VS Code, Cursor, Windsurf, and other VS Code-based editors. Never lose your flow when AI assistants need user input!
 
 ## ✨ What This Extension Does
 
-When working with AI assistants like Claude, sometimes they need to ask you questions or get your input. Instead of interrupting your conversation, this extension shows beautiful popups right in your editor where you can:
+When working with AI assistants, sometimes they need to ask you questions or get your input. Instead of interrupting your conversation, this extension shows beautiful popups right in your editor where you can:
 
 - Choose from multiple options with buttons
 - Type custom responses
@@ -23,10 +23,10 @@ All responses go directly back to your AI conversation seamlessly.
 ## 🎬 How It Works
 
 1. Install this extension in your VS Code-based editor
-2. Copy the provided configuration to Claude Desktop
-3. Start chatting with Claude
-4. When Claude needs input, a popup appears in your editor
-5. Your response goes directly back to Claude
+2. Copy the provided configuration to your MCPs json file
+3. Start chatting with your AI assistant
+4. When the AI assistant needs input, a popup appears in your editor
+5. Your response goes directly back to the AI assistant
 
 **Compatible with:**
 - VS Code
@@ -47,29 +47,38 @@ All responses go directly back to your AI conversation seamlessly.
 
 After installation, click "Copy MCP JSON Configuration" from the welcome notification or use the command palette (Ctrl+Shift+P) to find "Interactive MCP: Copy MCP JSON Configuration".
 
-### Step 3: Configure Claude Desktop
+### Step 3: Configure Your AI Assistant
 
-1. Open your Claude Desktop configuration file:
-   - **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
-   - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-   - **Linux**: `~/.config/Claude/claude_desktop_config.json`
+1. Find your AI assistant's MCP configuration file (varies by assistant)
 
 2. Add the copied configuration to the `mcpServers` section:
+   
+   **If this is your first MCP server:**
    ```json
    {
      "mcpServers": {
-       "interactive-mcp": {
-         // Paste your copied configuration here
-       }
+       // Paste your copied configuration here
+     }
+   }
+   ```
+   
+   **If you already have other MCP servers:**
+   ```json
+   {
+     "mcpServers": {
+       "existing-server": {
+         // your existing server config
+       },
+       // Paste your copied configuration here (adds "interactive-mcp" entry)
      }
    }
    ```
 
-3. Restart Claude Desktop
+3. Restart your AI assistant
 
 ### Step 4: Start Using
 
-That's it! When Claude needs your input, you'll see popups in VS Code automatically.
+That's it! When your AI assistant needs your input, you'll see popups in your editor automatically.
 
 ## 🎯 How to Use
 
@@ -81,7 +90,7 @@ Once set up, the extension works automatically:
 
 ### Status Indicators
 - 🔌 **MCP Disconnected** - Click to connect
-- ✅ **MCP Connected** - Ready to receive prompts from Claude
+- ✅ **MCP Connected** - Ready to receive prompts from AI assistants
 
 ## ⚙️ Settings
 
@@ -95,13 +104,13 @@ Customize the extension via: **File > Preferences > Settings > Extensions > Inte
 ## 🆘 Troubleshooting
 
 **Extension not connecting?**
-- Check that Claude Desktop is running
-- Verify the configuration was added correctly to `claude_desktop_config.json`
-- Try restarting both your editor and Claude Desktop
+- Check that your AI assistant is running
+- Verify the configuration was added correctly to your AI assistant's MCP config
+- Try restarting both your editor and your AI assistant
 
 **No popups appearing?**
 - Look for the "MCP Connected" status in your editor's status bar
-- Make sure you're asking Claude questions that require user input
+- Make sure you're asking questions that require user input
 - Check that popup notifications aren't being blocked by your system
 
 **Need help?**

@@ -41,12 +41,12 @@ npm start
 
 ## Configuration for AI Assistants
 
-Add this server to your MCP configuration (e.g., for Claude Desktop):
+Add this server to your MCP configuration (e.g., for Cursor):
 
 ```json
 {
   "mcpServers": {
-    "interactive": {
+    "interactive-mcp": {
       "command": "node",
       "args": ["/path/to/interactive-mcp-server/dist/index.js"]
     }

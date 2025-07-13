@@ -1,6 +1,6 @@
 {
-  "name": "interactive-mcp-helper",
-  "displayName": "Interactive MCP Helper",
+  "name": "interactive-mcp",
+  "displayName": "Interactive MCP",
   "description": "Enable AI assistants to show interactive popups and gather user input seamlessly in VS Code",
   "version": "0.2.0",
   "publisher": "interactive-mcp",
@@ -11,12 +11,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/interactive-mcp/interactive-mcp-helper.git"
+    "url": "https://github.com/interactive-mcp/interactive-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/interactive-mcp/interactive-mcp-helper/issues"
+    "url": "https://github.com/interactive-mcp/interactive-mcp/issues"
   },
-  "homepage": "https://github.com/interactive-mcp/interactive-mcp-helper#readme",
+  "homepage": "https://github.com/interactive-mcp/interactive-mcp#readme",
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -71,7 +71,7 @@
       }
     ],
     "configuration": {
-      "title": "Interactive MCP Helper",
+      "title": "Interactive MCP",
       "properties": {
         "interactiveMcp.serverPort": {
           "type": "number",

@@ -2,7 +2,7 @@
   "name": "interactive-mcp-helper",
   "displayName": "Interactive MCP Helper",
   "description": "Enable AI assistants to show interactive popups and gather user input seamlessly in VS Code",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "interactive-mcp",
   "author": {
     "name": "Interactive MCP Team",
@@ -63,6 +63,11 @@
         "command": "interactiveMcp.copyMcpConfig",
         "title": "Copy MCP JSON Configuration",
         "category": "Interactive MCP"
+      },
+      {
+        "command": "interactiveMcp.toggleChime",
+        "title": "Toggle Chime Sound",
+        "category": "Interactive MCP"
       }
     ],
     "configuration": {
@@ -87,6 +92,18 @@
           "type": "string",
           "default": "",
           "description": "Custom path to the MCP server executable (leave empty for auto-detection)"
+        },
+        "interactiveMcp.chimeEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable chime sound for modals."
+        },
+        "interactiveMcp.chimeVolume": {
+          "type": "number",
+          "default": 50,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Chime volume (0-100). Note: May be system-dependent."
         }
       }
     }

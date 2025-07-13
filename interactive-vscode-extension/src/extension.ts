@@ -2,10 +2,14 @@ import * as vscode from 'vscode';
 import WebSocket from 'ws';
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
+import * as fs from 'fs';
 
 let wsClient: WebSocket | undefined;
 let statusBarItem: vscode.StatusBarItem;
 let mcpServerProcess: ChildProcess | undefined;
+let outputChannel: vscode.OutputChannel;
+let extensionPath: string;
+let chimeToggleItem: vscode.StatusBarItem;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Interactive MCP Helper is now active!');
@@ -17,6 +21,21 @@ export function activate(context: vscode.ExtensionContext) {
     statusBarItem.command = 'interactiveMcp.connect';
     statusBarItem.show();
     context.subscriptions.push(statusBarItem);
+
+    chimeToggleItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+    chimeToggleItem.command = 'interactiveMcp.toggleChime';
+    updateChimeToggle();
+    chimeToggleItem.show();
+    context.subscriptions.push(chimeToggleItem);
+    context.subscriptions.push(vscode.commands.registerCommand('interactiveMcp.toggleChime', () => {
+        const config = vscode.workspace.getConfiguration('interactiveMcp');
+        const enabled = config.get<boolean>('chimeEnabled', true);
+        config.update('chimeEnabled', !enabled, vscode.ConfigurationTarget.Global);
+        updateChimeToggle();
+    }));
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('interactiveMcp.chimeEnabled')) updateChimeToggle();
+    }));
 
     // Register commands
     context.subscriptions.push(
@@ -57,6 +76,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Show installation notification with MCP config option
     showInstallationWelcome(context);
+
+    outputChannel = vscode.window.createOutputChannel('Interactive MCP');
+    context.subscriptions.push(outputChannel);
+    extensionPath = context.extensionPath;
 }
 
 async function startLocalMcpServer(context: vscode.ExtensionContext): Promise<boolean> {
@@ -1397,16 +1420,44 @@ function createQuickPingHTML(): string {
 }
 
 function playAlertSound() {
+  const config = vscode.workspace.getConfiguration('interactiveMcp');
+  if (!config.get<boolean>('chimeEnabled', true)) return;
+  const volume = config.get<number>('chimeVolume', 50) / 100;
+  const soundPath = path.join(extensionPath, 'sounds', 'chime.wav');
+  outputChannel.appendLine(`[Sound] Attempting playback at: ${soundPath}`);
+  if (!fs.existsSync(soundPath)) {
+    outputChannel.appendLine('[Sound] Error: File not found! Check if sounds/chime.wav is bundled.');
+    return;
+  }
   let command;
+  let args = [];
   if (process.platform === 'win32') {
     command = 'powershell';
-    const args = ['[console]::beep(1000, 150)'];
-    spawn(command, args, { shell: true });
+    args = ['-NoProfile', '-c', `(New-Object Media.SoundPlayer '${soundPath.replace(/\//g, '\\')}').PlaySync()`];
   } else if (process.platform === 'darwin') {
-    spawn('afplay', ['/System/Library/Sounds/Ping.aiff']);
+    command = 'afplay';
+    args = [soundPath, '-v', volume.toString()];
   } else {
-    spawn('aplay', ['/usr/share/sounds/alsa/Front_Center.wav']);
+    command = 'aplay';
+    args = ['-v', volume.toString(), soundPath];
   }
+  outputChannel.appendLine(`[Sound] Spawning: ${command} ${args.join(' ')}`);
+  const proc = spawn(command, args, { shell: true });
+  proc.stdout.on('data', (data) => outputChannel.appendLine(`[Sound] stdout: ${data}`));
+  proc.stderr.on('data', (data) => outputChannel.appendLine(`[Sound] stderr: ${data}`));
+  proc.on('error', (err) => {
+    outputChannel.appendLine(`[Sound] Playback error: ${err.message}`);
+  });
+  proc.on('close', (code) => {
+    outputChannel.appendLine(`[Sound] Process closed with code ${code}`);
+  });
+}
+
+function updateChimeToggle() {
+  const config = vscode.workspace.getConfiguration('interactiveMcp');
+  const enabled = config.get<boolean>('chimeEnabled', true);
+  chimeToggleItem.text = enabled ? '$(unmute)' : '$(mute)';
+  chimeToggleItem.tooltip = enabled ? 'Chime Enabled (click to disable)' : 'Chime Disabled (click to enable)';
 }
 
 // Generate and copy MCP configuration JSON to clipboard

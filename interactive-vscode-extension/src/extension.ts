@@ -13,8 +13,151 @@ let extensionPath: string;
 let chimeToggleItem: vscode.StatusBarItem;
 let workspaceId: string;
 let sessionId: string;
-let lastActivityTime: number = 0;
-let activityMonitor: NodeJS.Timeout | undefined;
+
+// State Machine for reliable connection management
+type ConnectionState = 'DISCONNECTED' | 'STARTING' | 'CONNECTED' | 'READY' | 'ERROR';
+
+class ConnectionStateMachine {
+    private currentState: ConnectionState = 'DISCONNECTED';
+    private context: vscode.ExtensionContext;
+    private pairingTimeout: NodeJS.Timeout | undefined;
+
+    constructor(context: vscode.ExtensionContext) {
+        this.context = context;
+        this.updateUI();
+    }
+
+    getCurrentState(): ConnectionState {
+        return this.currentState;
+    }
+
+    // Atomic state transition with cleanup
+    transition(newState: ConnectionState, data?: { error?: string }) {
+        const oldState = this.currentState;
+        
+        // Exit current state (cleanup)
+        this.exitState(oldState);
+        
+        // Set new state
+        this.currentState = newState;
+        
+        // Enter new state (setup)
+        this.enterState(newState, data);
+        
+        // Update UI
+        this.updateUI();
+        
+        logInfo(`🔄 State transition: ${oldState} → ${newState}`);
+    }
+
+    private exitState(state: ConnectionState) {
+        switch (state) {
+            case 'CONNECTED':
+                // Clear pairing timeout
+                if (this.pairingTimeout) {
+                    clearTimeout(this.pairingTimeout);
+                    this.pairingTimeout = undefined;
+                }
+                break;
+            case 'READY':
+                // No special cleanup needed
+                break;
+            default:
+                // No cleanup needed for other states
+                break;
+        }
+    }
+
+    private enterState(state: ConnectionState, data?: { error?: string }) {
+        switch (state) {
+            case 'STARTING':
+                // Will be handled by the enable function
+                break;
+            case 'CONNECTED':
+                // Set pairing timeout
+                this.pairingTimeout = setTimeout(() => {
+                    this.transition('ERROR', { error: 'Workspace pairing timed out. Make sure Claude Desktop is running with Interactive MCP configured.' });
+                }, 10000);
+                break;
+            case 'READY':
+                // Success! No special setup needed
+                break;
+            case 'ERROR':
+                // Log the error
+                if (data?.error) {
+                    logError('Connection error: ' + data.error);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    private updateUI() {
+        switch (this.currentState) {
+            case 'DISCONNECTED':
+                statusBarItem.text = "$(circle-slash) Interactive MCP Tools Off";
+                statusBarItem.tooltip = "Click to enable Interactive MCP tools";
+                statusBarItem.command = 'interactiveMcp.enable';
+                break;
+            case 'STARTING':
+                statusBarItem.text = "$(sync~spin) Interactive MCP Starting...";
+                statusBarItem.tooltip = "Setting up Interactive MCP tools...";
+                statusBarItem.command = undefined; // Disable clicking
+                break;
+            case 'CONNECTED':
+                statusBarItem.text = "$(sync~spin) Interactive MCP Pairing...";
+                statusBarItem.tooltip = "Coordinating workspace pairing...";
+                statusBarItem.command = undefined; // Disable clicking
+                break;
+            case 'READY':
+                statusBarItem.text = "$(check-all) Interactive MCP Tools Ready";
+                statusBarItem.tooltip = "✅ Tools ready for AI assistants! Click to disable";
+                statusBarItem.command = 'interactiveMcp.disable';
+                break;
+            case 'ERROR':
+                statusBarItem.text = "$(circle-slash) Interactive MCP Tools Off";
+                statusBarItem.tooltip = "Error occurred - click to try enabling again";
+                statusBarItem.command = 'interactiveMcp.enable';
+                break;
+        }
+    }
+
+    // Event handlers
+    handleRouterConnected() {
+        if (this.currentState === 'STARTING') {
+            this.transition('CONNECTED');
+        }
+    }
+
+    handleWorkspacePaired() {
+        if (this.currentState === 'CONNECTED') {
+            this.transition('READY');
+        }
+    }
+
+    handleError(error: string) {
+        this.transition('ERROR', { error });
+    }
+
+    handleEnable() {
+        if (this.currentState === 'DISCONNECTED' || this.currentState === 'ERROR') {
+            this.transition('STARTING');
+            return true; // Proceed with enable
+        }
+        return false; // Don't proceed
+    }
+
+    handleDisable() {
+        if (this.currentState !== 'DISCONNECTED') {
+            this.transition('DISCONNECTED');
+            return true; // Proceed with disable
+        }
+        return false; // Already disconnected
+    }
+}
+
+let connectionStateMachine: ConnectionStateMachine;
 
 // Logging helper functions
 function logInfo(message: string) {
@@ -49,11 +192,11 @@ export function activate(context: vscode.ExtensionContext) {
     
     // Create status bar item
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    statusBarItem.text = "$(circle-slash) Interactive MCP Tools Off";
-    statusBarItem.tooltip = "Click to enable Interactive MCP tools";
-    statusBarItem.command = 'interactiveMcp.enable';
     statusBarItem.show();
     context.subscriptions.push(statusBarItem);
+
+    // Initialize state machine (this will set initial UI state)
+    connectionStateMachine = new ConnectionStateMachine(context);
 
     chimeToggleItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
     chimeToggleItem.command = 'interactiveMcp.toggleChime';
@@ -246,32 +389,24 @@ async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: 
     const maxRetries = 3;
 
     logInfo(`Connection attempt ${retryCount + 1}/${maxRetries + 1} to shared router on port ${port}`);
-    
-    // Update status bar to show connection attempt
-    statusBarItem.text = "$(sync~spin) Interactive MCP Connecting...";
-    statusBarItem.tooltip = `Connecting to Interactive MCP router (attempt ${retryCount + 1}/${maxRetries + 1})`;
 
     if (wsClient && wsClient.readyState === WebSocket.OPEN) {
         logInfo('Already connected to Interactive MCP router');
-        statusBarItem.text = "$(check) Interactive MCP Connected";
-        statusBarItem.tooltip = "Connected to Interactive MCP router";
-        return;
+        // Force clean slate - close existing connection and reconnect
+        logInfo('Closing existing connection to ensure clean state');
+        disconnectFromMcpServer();
+        // Continue with fresh connection
     }
 
     // Try to start shared router if auto-start is enabled
     if (autoStartServer) {
-        statusBarItem.text = "$(sync~spin) Starting Interactive MCP Router...";
-        statusBarItem.tooltip = "Starting Interactive MCP router";
         
         const routerStarted = await startSharedRouter(context);
         logInfo(`Router startup result: ${routerStarted ? 'success' : 'failed/already running'}`);
         
         if (!routerStarted) {
-            statusBarItem.text = "$(error) Interactive MCP Router Failed";
-            statusBarItem.tooltip = "Interactive MCP router startup failed - click to retry";
-            statusBarItem.command = 'interactiveMcp.enable';
-            vscode.window.showErrorMessage('Failed to start Interactive MCP router. Please check the output for details.');
-            return;
+            // ensureRouterRunning will throw an error that gets caught by enableInteractiveMcp
+            throw new Error('Failed to start Interactive MCP router');
         }
     }
 
@@ -282,10 +417,7 @@ async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: 
         logInfo('📡 WebSocket client created, waiting for connection...');
     } catch (error) {
         logError('❌ Failed to create WebSocket client', error);
-        statusBarItem.text = "$(error) Interactive MCP Failed";
-        statusBarItem.tooltip = "Failed to create WebSocket - click to retry";
-        statusBarItem.command = 'interactiveMcp.enable';
-        return;
+        throw error; // Let enableInteractiveMcp handle the error
     }
 
     wsClient.on('open', () => {
@@ -312,32 +444,11 @@ async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: 
             return;
         }
         
-        statusBarItem.text = "$(sync~spin) Interactive MCP Pairing...";
-        statusBarItem.tooltip = `Connected to router, coordinating workspace pairing...`;
-        statusBarItem.command = undefined; // Disable clicking during pairing
+        // Notify state machine of successful router connection
+        connectionStateMachine.handleRouterConnected();
         logInfo('✅ VS Code extension successfully connected to Interactive MCP router - coordinating workspace...');
         
-        // Set a timeout for workspace pairing
-        setTimeout(() => {
-            if (statusBarItem.text.includes("Pairing")) {
-                logError('Workspace pairing timed out after 10 seconds');
-                statusBarItem.text = "$(warning) Interactive MCP Pairing Timeout";
-                statusBarItem.tooltip = "Workspace pairing failed - no compatible MCP server found (click to retry)";
-                statusBarItem.command = 'interactiveMcp.enable';
-                vscode.window.showWarningMessage('Interactive MCP pairing timed out. Make sure Claude Desktop is running with Interactive MCP configured.', 'Retry').then(action => {
-                    if (action === 'Retry') {
-                        enableInteractiveMcp(context);
-                    }
-                });
-            }
-        }, 10000); // 10 second timeout
-        
-        // Show success message only on first connection or after failures
-        if (retryCount > 0) {
-            vscode.window.showInformationMessage('Successfully reconnected to Interactive MCP router');
-        } else {
-            vscode.window.showInformationMessage('Connected to Interactive MCP router - waiting for workspace pairing...');
-        }
+        // No notifications needed - state machine handles UI updates
     });
 
     wsClient.on('message', async (data: WebSocket.Data) => {
@@ -367,43 +478,28 @@ async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: 
         // Clear the wsClient reference
         wsClient = undefined;
         
-        // Determine disconnection type and update status accordingly
+        // Determine disconnection type
         const isNormalClosure = code === 1000;
         const isGoingAway = code === 1001;
         
         if (isNormalClosure || isGoingAway) {
-            // Normal disconnection
-            statusBarItem.text = "$(circle-slash) Interactive MCP Tools Off";
-            statusBarItem.tooltip = "Click to enable Interactive MCP tools";
+            // Normal disconnection - go to disconnected state
             logInfo('Normal disconnection from router');
+            connectionStateMachine.transition('DISCONNECTED');
         } else {
-            // Unexpected disconnection
-            statusBarItem.text = "$(warning) Interactive MCP Connection Lost";
-            statusBarItem.tooltip = `Connection lost (code: ${code}) - click to reconnect`;
-            
-            vscode.window.showWarningMessage(
-                `Lost connection to Interactive MCP router (code: ${code})`,
-                'Reconnect'
-            ).then(action => {
-                if (action === 'Reconnect') {
-                    setTimeout(() => connectToMcpServer(context, 0), 500);
-                }
-            });
+            // Unexpected disconnection - this is an error
+            logInfo(`Unexpected disconnection (code: ${code})`);
+            connectionStateMachine.handleError(`Connection lost (code: ${code})`);
             
             // Auto-reconnect for unexpected disconnections if auto-connect is enabled
             const config = vscode.workspace.getConfiguration('interactiveMcp');
             if (config.get<boolean>('autoConnect') && retryCount === 0) {
                 logInfo('Attempting automatic reconnection in 3 seconds...');
-                statusBarItem.text = "$(sync~spin) Interactive MCP Auto-reconnecting...";
-                statusBarItem.tooltip = "Automatically reconnecting...";
                 setTimeout(() => {
                     enableInteractiveMcp(context);
                 }, 3000);
-                return;
             }
         }
-        
-        statusBarItem.command = 'interactiveMcp.enable';
     });
 
     wsClient.on('error', (error: Error) => {
@@ -419,31 +515,8 @@ async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: 
             }, retryDelay);
         } else {
             logError('Max connection retries exceeded');
-            
-            // Show detailed error message with troubleshooting steps
-            const troubleshootAction = 'Troubleshoot';
-            const retryAction = 'Retry';
-            vscode.window.showErrorMessage(
-                `Interactive MCP connection failed after ${maxRetries + 1} attempts. ${error.message || 'Unknown connection error'}`,
-                troubleshootAction,
-                retryAction
-            ).then(action => {
-                if (action === troubleshootAction) {
-                    // Show troubleshooting information
-                    vscode.window.showInformationMessage(
-                        'Troubleshooting: 1) Check if another application is using port ' + port + 
-                        ', 2) Restart VS Code, 3) Check the "Interactive MCP" output panel for detailed logs'
-                    );
-                } else if (action === retryAction) {
-                    // Retry connection
-                    setTimeout(() => connectToMcpServer(context, 0), 1000);
-                }
-            });
-            
-            // Update status bar to show failed state
-            statusBarItem.text = "$(error) Interactive MCP Failed";
-            statusBarItem.tooltip = `Connection failed after ${maxRetries + 1} attempts - click to retry`;
-            statusBarItem.command = 'interactiveMcp.enable';
+            const errorMessage = `Connection failed after ${maxRetries + 1} attempts: ${error.message || 'Unknown error'}`;
+            connectionStateMachine.handleError(errorMessage);
         }
     });
 }
@@ -455,14 +528,15 @@ function disconnectFromMcpServer() {
     }
 }
 
-// New simplified enable function - does everything needed to get tools working
+// New simplified enable function - uses state machine for reliability
 async function enableInteractiveMcp(context: vscode.ExtensionContext) {
     logInfo('🚀 Enabling Interactive MCP tools...');
     
-    // Update status to show we're starting
-    statusBarItem.text = "$(sync~spin) Interactive MCP Starting...";
-    statusBarItem.tooltip = "Setting up Interactive MCP tools...";
-    statusBarItem.command = undefined; // Disable clicking while starting
+    // Check if state machine allows enable
+    if (!connectionStateMachine.handleEnable()) {
+        logInfo('Enable request ignored - not in correct state');
+        return;
+    }
     
     try {
         // Step 1: Ensure router is running (this handles port conflicts)
@@ -473,35 +547,24 @@ async function enableInteractiveMcp(context: vscode.ExtensionContext) {
         
         logInfo('✅ Interactive MCP tools enabled successfully');
     } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         logError('❌ Failed to enable Interactive MCP tools', error);
-        
-        // Set error state
-        statusBarItem.text = "$(error) Interactive MCP Error";
-        statusBarItem.tooltip = `Failed to start: ${error instanceof Error ? error.message : 'Unknown error'} (click to retry)`;
-        statusBarItem.command = 'interactiveMcp.enable';
-        
-        vscode.window.showErrorMessage(`Failed to enable Interactive MCP tools: ${error instanceof Error ? error.message : 'Unknown error'}`, 'Retry').then(action => {
-            if (action === 'Retry') {
-                enableInteractiveMcp(context);
-            }
-        });
+        connectionStateMachine.handleError(errorMessage);
     }
 }
 
-// New simplified disable function
+// New simplified disable function - uses state machine for reliability
 function disableInteractiveMcp() {
     logInfo('🛑 Disabling Interactive MCP tools...');
     
-    // Stop activity monitoring
-    stopActivityMonitoring();
+    // Check if state machine allows disable
+    if (!connectionStateMachine.handleDisable()) {
+        logInfo('Disable request ignored - not in correct state');
+        return;
+    }
     
     // Disconnect from router
     disconnectFromMcpServer();
-    
-    // Update status
-    statusBarItem.text = "$(circle-slash) Interactive MCP Tools Off";
-    statusBarItem.tooltip = "Click to enable Interactive MCP tools";
-    statusBarItem.command = 'interactiveMcp.enable';
     
     logInfo('✅ Interactive MCP tools disabled');
 }
@@ -541,54 +604,14 @@ function handleWorkspaceSyncComplete(message: any) {
     // Update our workspace ID if needed
     workspaceId = finalWorkspace;
     
-    // Update status to show tools are ready - this is what users care about!
-    statusBarItem.text = "$(check-all) Interactive MCP Tools Ready";
-    statusBarItem.tooltip = `✅ Tools ready for AI assistants! Workspace: ${finalWorkspace} (click to disable)`;
-    statusBarItem.command = 'interactiveMcp.disable';
-    
-    // Show success notification
-    vscode.window.showInformationMessage('🎉 Interactive MCP tools are ready! AI assistants can now show popups.');
-    
-    // Start activity monitoring
-    startActivityMonitoring();
+    // Notify state machine of successful pairing
+    connectionStateMachine.handleWorkspacePaired();
 }
 
-// Start monitoring for MCP activity to detect when tools are disabled
-function startActivityMonitoring() {
-    lastActivityTime = Date.now();
-    
-    // Clear any existing monitor
-    if (activityMonitor) {
-        clearInterval(activityMonitor);
-    }
-    
-    // Check every 30 seconds if we've received any activity
-    activityMonitor = setInterval(() => {
-        const timeSinceLastActivity = Date.now() - lastActivityTime;
-        
-        // If no activity for 2 minutes and status shows tools ready, tools might be disabled
-        if (timeSinceLastActivity > 120000 && statusBarItem.text.includes("Tools Ready")) {
-            logInfo('🔍 No MCP activity detected for 2 minutes - tools may be disabled in Claude Desktop');
-            statusBarItem.text = "$(question) Interactive MCP Tools Inactive";
-            statusBarItem.tooltip = "No recent activity detected. Tools may be disabled in Claude Desktop. (click to refresh)";
-            statusBarItem.command = 'interactiveMcp.enable';
-        }
-    }, 30000);
-}
-
-// Stop activity monitoring
-function stopActivityMonitoring() {
-    if (activityMonitor) {
-        clearInterval(activityMonitor);
-        activityMonitor = undefined;
-    }
-}
 
 async function handleMcpRequest(message: any) {
     if (message.type === 'request') {
-        // Update activity timestamp
-        lastActivityTime = Date.now();
-        logInfo(`📥 Received ${message.inputType} request - tools are active`);
+        logInfo(`📥 Received ${message.inputType} request`);
         
         let response: any;
 
@@ -1544,7 +1567,7 @@ function updateChimeToggle() {
   const config = vscode.workspace.getConfiguration('interactiveMcp');
   const enabled = config.get<boolean>('chimeEnabled', true);
   chimeToggleItem.text = enabled ? '$(music)' : '$(mute)';
-  chimeToggleItem.tooltip = enabled ? 'Interactive MCP Chime ON (click to disable)' : 'Interactive MCP Chime OFF (click to enable)';
+  chimeToggleItem.tooltip = enabled ? 'Interactive MCP Chime is ON' : 'Interactive MCP Chime is OFF';
 }
 
 // Generate and copy MCP configuration JSON to clipboard

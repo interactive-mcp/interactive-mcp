@@ -14,13 +14,32 @@ let chimeToggleItem: vscode.StatusBarItem;
 let workspaceId: string;
 let sessionId: string;
 
+// Router startup synchronization
+let routerStartupMutex: boolean = false;
+
+// WebSocket connection synchronization
+let wsConnectionMutex: boolean = false;
+
 // State Machine for reliable connection management
 type ConnectionState = 'DISCONNECTED' | 'STARTING' | 'CONNECTED' | 'READY' | 'ERROR';
+
+// Interface for state transition data
+interface StateTransitionData {
+    error?: string;
+}
+
+// Interface for state machine configuration
+interface StateMachineConfig {
+    pairingTimeoutMs: number;
+    maxRetries: number;
+}
 
 class ConnectionStateMachine {
     private currentState: ConnectionState = 'DISCONNECTED';
     private context: vscode.ExtensionContext;
     private pairingTimeout: NodeJS.Timeout | undefined;
+    private transitionMutex: boolean = false;
+    private operationMutex: boolean = false;
 
     constructor(context: vscode.ExtensionContext) {
         this.context = context;
@@ -31,23 +50,84 @@ class ConnectionStateMachine {
         return this.currentState;
     }
 
-    // Atomic state transition with cleanup
+    // Thread-safe state checking
+    isInState(state: ConnectionState): boolean {
+        return this.currentState === state;
+    }
+
+    // Check if state machine is ready for operations
+    isReady(): boolean {
+        return this.currentState === 'READY' && !this.transitionMutex && !this.operationMutex;
+    }
+
+    // Get detailed state information for debugging
+    getStateInfo(): { state: ConnectionState; transitionLocked: boolean; operationLocked: boolean; hasPairingTimeout: boolean } {
+        return {
+            state: this.currentState,
+            transitionLocked: this.transitionMutex,
+            operationLocked: this.operationMutex,
+            hasPairingTimeout: this.pairingTimeout !== undefined
+        };
+    }
+
+    // Atomic state transition with cleanup and mutex protection
     transition(newState: ConnectionState, data?: { error?: string }) {
+        // Prevent concurrent transitions
+        if (this.transitionMutex) {
+            logInfo(`⚠️ State transition blocked: ${this.currentState} → ${newState} (transition in progress)`);
+            return;
+        }
+
+        // Validate state transition
+        if (!this.isValidTransition(this.currentState, newState)) {
+            logError(`❌ Invalid state transition: ${this.currentState} → ${newState}`);
+            return;
+        }
+
+        this.transitionMutex = true;
         const oldState = this.currentState;
         
-        // Exit current state (cleanup)
-        this.exitState(oldState);
-        
-        // Set new state
-        this.currentState = newState;
-        
-        // Enter new state (setup)
-        this.enterState(newState, data);
-        
-        // Update UI
-        this.updateUI();
-        
-        logInfo(`🔄 State transition: ${oldState} → ${newState}`);
+        try {
+            // Exit current state (cleanup)
+            this.exitState(oldState);
+            
+            // Set new state
+            this.currentState = newState;
+            
+            // Enter new state (setup)
+            this.enterState(newState, data);
+            
+            // Update UI
+            this.updateUI();
+            
+            logInfo(`🔄 State transition: ${oldState} → ${newState}`);
+        } catch (error) {
+            logError(`❌ Error during state transition ${oldState} → ${newState}`, error);
+            // Rollback to previous state on error
+            this.currentState = oldState;
+            this.updateUI();
+        } finally {
+            this.transitionMutex = false;
+        }
+    }
+
+    // Validate if a state transition is allowed
+    private isValidTransition(from: ConnectionState, to: ConnectionState): boolean {
+        // Allow same-state transitions (idempotent)
+        if (from === to) {
+            return true;
+        }
+
+        // Define valid state transitions
+        const validTransitions: Record<ConnectionState, ConnectionState[]> = {
+            'DISCONNECTED': ['STARTING', 'ERROR'],
+            'STARTING': ['CONNECTED', 'ERROR', 'DISCONNECTED'],
+            'CONNECTED': ['READY', 'ERROR', 'DISCONNECTED'],
+            'READY': ['DISCONNECTED', 'ERROR'],
+            'ERROR': ['STARTING', 'DISCONNECTED', 'READY']
+        };
+
+        return validTransitions[from]?.includes(to) || false;
     }
 
     private exitState(state: ConnectionState) {
@@ -123,37 +203,87 @@ class ConnectionStateMachine {
         }
     }
 
-    // Event handlers
+    // Event handlers with state validation
     handleRouterConnected() {
+        if (this.transitionMutex) {
+            logInfo('⚠️ Router connected event ignored - transition in progress');
+            return;
+        }
+        
         if (this.currentState === 'STARTING') {
             this.transition('CONNECTED');
+        } else {
+            logInfo(`⚠️ Router connected event ignored - current state: ${this.currentState}`);
         }
     }
 
     handleWorkspacePaired() {
+        if (this.transitionMutex) {
+            logInfo('⚠️ Workspace paired event ignored - transition in progress');
+            return;
+        }
+        
         if (this.currentState === 'CONNECTED') {
             this.transition('READY');
+        } else if (this.currentState === 'ERROR') {
+            // Allow recovery from ERROR state when workspace coordination completes
+            logInfo('🔄 Workspace paired event received in ERROR state - attempting recovery');
+            this.transition('READY');
+        } else {
+            logInfo(`⚠️ Workspace paired event ignored - current state: ${this.currentState}`);
         }
     }
 
     handleError(error: string) {
+        // Error transitions are always allowed to prevent stuck states
         this.transition('ERROR', { error });
+        // Release operation lock on error to prevent deadlock
+        this.operationMutex = false;
     }
 
     handleEnable() {
+        // Prevent concurrent enable/disable operations
+        if (this.operationMutex) {
+            logInfo('⚠️ Enable request blocked - operation already in progress');
+            return false;
+        }
+
         if (this.currentState === 'DISCONNECTED' || this.currentState === 'ERROR') {
+            this.operationMutex = true;
             this.transition('STARTING');
             return true; // Proceed with enable
         }
+        
+        logInfo(`⚠️ Enable request ignored - current state: ${this.currentState}`);
         return false; // Don't proceed
     }
 
     handleDisable() {
+        // Prevent concurrent enable/disable operations
+        if (this.operationMutex) {
+            logInfo('⚠️ Disable request blocked - operation already in progress');
+            return false;
+        }
+
         if (this.currentState !== 'DISCONNECTED') {
+            this.operationMutex = true;
             this.transition('DISCONNECTED');
             return true; // Proceed with disable
         }
+        
+        logInfo('⚠️ Disable request ignored - already disconnected');
         return false; // Already disconnected
+    }
+
+    // Release operation mutex (called after enable/disable completes)
+    releaseOperationLock() {
+        this.operationMutex = false;
+        logDebug('🔓 Operation mutex released');
+    }
+
+    // Check if an operation is in progress
+    isOperationInProgress(): boolean {
+        return this.operationMutex;
     }
 }
 
@@ -179,6 +309,112 @@ function logDebug(message: string) {
     const timestamp = new Date().toISOString();
     if (outputChannel) {
         outputChannel.appendLine(`[${timestamp}] DEBUG: ${message}`);
+    }
+}
+
+// Message queue for messages sent during connection transitions
+interface QueuedMessage {
+    message: any;
+    timestamp: number;
+    retries: number;
+}
+
+let messageQueue: QueuedMessage[] = [];
+const MAX_QUEUE_SIZE = 50;
+const MAX_MESSAGE_RETRIES = 3;
+const MESSAGE_RETRY_DELAY = 1000;
+
+// Robust message sending with validation and queuing
+function sendWebSocketMessage(message: any): boolean {
+    if (!validateWebSocketState('send')) {
+        // Queue message if WebSocket is not ready but might recover
+        if (wsClient && (wsClient.readyState === WebSocket.CONNECTING)) {
+            queueMessage(message);
+            logInfo('📦 Message queued - WebSocket connecting');
+            return true; // Optimistic return - message is queued
+        }
+        return false;
+    }
+    
+    try {
+        const messageStr = JSON.stringify(message);
+        wsClient!.send(messageStr);
+        logDebug(`📤 WebSocket message sent: ${message.type}`);
+        return true;
+    } catch (error) {
+        logError('❌ Failed to send WebSocket message', error);
+        
+        // Queue message for retry if connection might recover
+        if (wsClient && wsClient.readyState !== WebSocket.CLOSED) {
+            queueMessage(message);
+            logInfo('📦 Message queued for retry after send failure');
+        }
+        
+        return false;
+    }
+}
+
+// Queue message for later sending
+function queueMessage(message: any) {
+    // Prevent queue overflow
+    if (messageQueue.length >= MAX_QUEUE_SIZE) {
+        logInfo('⚠️ Message queue full - removing oldest message');
+        messageQueue.shift();
+    }
+    
+    messageQueue.push({
+        message,
+        timestamp: Date.now(),
+        retries: 0
+    });
+    
+    logDebug(`📦 Message queued (queue size: ${messageQueue.length})`);
+}
+
+// Process queued messages when connection is restored
+function processMessageQueue() {
+    if (messageQueue.length === 0) {
+        return;
+    }
+    
+    logInfo(`📦 Processing ${messageQueue.length} queued messages...`);
+    
+    const messagesToProcess = [...messageQueue];
+    messageQueue = [];
+    
+    for (const queuedMessage of messagesToProcess) {
+        const { message, timestamp, retries } = queuedMessage;
+        
+        // Skip messages that are too old (older than 30 seconds)
+        if (Date.now() - timestamp > 30000) {
+            logInfo(`⏰ Skipping expired queued message: ${message.type}`);
+            continue;
+        }
+        
+        // Try to send the message
+        if (!sendWebSocketMessage(message)) {
+            // Re-queue if under retry limit
+            if (retries < MAX_MESSAGE_RETRIES) {
+                setTimeout(() => {
+                    messageQueue.push({
+                        message,
+                        timestamp,
+                        retries: retries + 1
+                    });
+                    logDebug(`🔄 Message re-queued for retry ${retries + 1}/${MAX_MESSAGE_RETRIES}`);
+                }, MESSAGE_RETRY_DELAY);
+            } else {
+                logError(`❌ Message dropped after ${MAX_MESSAGE_RETRIES} retries: ${message.type}`);
+            }
+        }
+    }
+}
+
+// Clear message queue (called on disconnect)
+function clearMessageQueue() {
+    if (messageQueue.length > 0) {
+        logInfo(`🗑️ Clearing ${messageQueue.length} queued messages`);
+        messageQueue = [];
     }
 }
 
@@ -383,42 +619,175 @@ function getServerPath(context: vscode.ExtensionContext): string | null {
 }
 
 async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: number = 0) {
-    const config = vscode.workspace.getConfiguration('interactiveMcp');
-    const port = config.get<number>('serverPort') || 8547;
-    const autoStartServer = config.get<boolean>('autoStartServer');
-    const maxRetries = 3;
-
-    logInfo(`Connection attempt ${retryCount + 1}/${maxRetries + 1} to shared router on port ${port}`);
-
-    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-        logInfo('Already connected to Interactive MCP router');
-        // Force clean slate - close existing connection and wait for it to close
-        logInfo('Closing existing connection to ensure clean state');
-        disconnectFromMcpServer();
-        // Wait a bit for the close to process
-        await new Promise(resolve => setTimeout(resolve, 100));
+    // Prevent overlapping connection attempts with mutex protection
+    if (wsConnectionMutex) {
+        logInfo('⚠️ WebSocket connection attempt blocked - connection operation already in progress');
+        return;
     }
 
-    // Try to start shared router if auto-start is enabled
-    if (autoStartServer) {
-        
-        const routerStarted = await startSharedRouter(context);
-        logInfo(`Router startup result: ${routerStarted ? 'success' : 'failed/already running'}`);
-        
-        if (!routerStarted) {
-            // ensureRouterRunning will throw an error that gets caught by enableInteractiveMcp
-            throw new Error('Failed to start Interactive MCP router');
-        }
-    }
-
-    logInfo(`🔌 Creating WebSocket connection to ws://localhost:${port}`);
+    wsConnectionMutex = true;
     
     try {
-        wsClient = new WebSocket(`ws://localhost:${port}`);
-        logInfo('📡 WebSocket client created, waiting for connection...');
+        const config = vscode.workspace.getConfiguration('interactiveMcp');
+        const port = config.get<number>('serverPort') || 8547;
+        const autoStartServer = config.get<boolean>('autoStartServer');
+        const maxRetries = 3;
+
+        logInfo(`Connection attempt ${retryCount + 1}/${maxRetries + 1} to shared router on port ${port}`);
+
+        // Always cleanup existing connection first before validation
+        if (wsClient) {
+            logInfo('Cleaning up existing WebSocket connection before new attempt');
+            await cleanupWebSocketConnection();
+        }
+
+        // Validate WebSocket state after cleanup
+        if (!validateWebSocketState('connect')) {
+            logInfo('⚠️ WebSocket connection aborted - invalid state for connection after cleanup');
+            return;
+        }
+
+        // Try to start shared router if auto-start is enabled
+        if (autoStartServer) {
+            
+            const routerStarted = await startSharedRouter(context);
+            logInfo(`Router startup result: ${routerStarted ? 'success' : 'failed/already running'}`);
+            
+            if (!routerStarted) {
+                // ensureRouterRunning will throw an error that gets caught by enableInteractiveMcp
+                throw new Error('Failed to start Interactive MCP router');
+            }
+        }
+
+        logInfo(`🔌 Creating WebSocket connection to ws://localhost:${port}`);
+        
+        try {
+            wsClient = new WebSocket(`ws://localhost:${port}`);
+            logInfo('📡 WebSocket client created, waiting for connection...');
+        } catch (error) {
+            logError('❌ Failed to create WebSocket client', error);
+            throw error; // Let enableInteractiveMcp handle the error
+        }
+
+        // Enhanced WebSocket event handlers with better error recovery
+        setupWebSocketEventHandlers(context, retryCount, maxRetries);
+        
     } catch (error) {
-        logError('❌ Failed to create WebSocket client', error);
-        throw error; // Let enableInteractiveMcp handle the error
+        logError('❌ Error in connectToMcpServer', error);
+        throw error;
+    } finally {
+        // Always release the connection mutex
+        wsConnectionMutex = false;
+    }
+}
+
+// Validate WebSocket state before operations
+function validateWebSocketState(operation: string): boolean {
+    if (wsClient) {
+        const state = wsClient.readyState;
+        
+        switch (operation) {
+            case 'connect':
+                // Only block if WebSocket is actually OPEN or CONNECTING
+                // Allow connections when WebSocket is CLOSED or CLOSING (these are safe to replace)
+                if (state === WebSocket.OPEN) {
+                    logInfo(`⚠️ WebSocket already connected - ${operation} operation may cause race condition`);
+                    return false;
+                }
+                if (state === WebSocket.CONNECTING) {
+                    logInfo(`⚠️ WebSocket already connecting - ${operation} operation blocked`);
+                    return false;
+                }
+                // CLOSED and CLOSING states are safe for new connections
+                logInfo(`✅ WebSocket in ${getWebSocketStateString(state)} state - safe for new connection`);
+                break;
+                
+            case 'send':
+                if (state !== WebSocket.OPEN) {
+                    logInfo(`⚠️ WebSocket not ready for sending (state: ${getWebSocketStateString(state)})`);
+                    return false;
+                }
+                break;
+                
+            case 'close':
+                if (state === WebSocket.CLOSED || state === WebSocket.CLOSING) {
+                    logInfo(`⚠️ WebSocket already closed/closing - ${operation} operation unnecessary`);
+                    return false;
+                }
+                break;
+        }
+    }
+    
+    return true;
+}
+
+// Get human-readable WebSocket state string
+function getWebSocketStateString(state: number): string {
+    switch (state) {
+        case WebSocket.CONNECTING: return 'CONNECTING';
+        case WebSocket.OPEN: return 'OPEN';
+        case WebSocket.CLOSING: return 'CLOSING';
+        case WebSocket.CLOSED: return 'CLOSED';
+        default: return 'UNKNOWN';
+    }
+}
+
+// Enhanced WebSocket connection cleanup
+async function cleanupWebSocketConnection(): Promise<void> {
+    if (!wsClient) {
+        return;
+    }
+    
+    logInfo('🧹 Performing enhanced WebSocket cleanup...');
+    
+    // Reset wsClient immediately to prevent reuse
+    const clientToCleanup = wsClient;
+    wsClient = undefined;
+    
+    try {
+        // Remove all listeners to prevent events during cleanup
+        clientToCleanup.removeAllListeners();
+        
+        // Close connection if not already closed
+        if (clientToCleanup.readyState === WebSocket.OPEN || clientToCleanup.readyState === WebSocket.CONNECTING) {
+            clientToCleanup.close(1000, 'Clean shutdown');
+            
+            // Wait for close to complete with timeout
+            await new Promise<void>((resolve) => {
+                const timeout = setTimeout(() => {
+                    logInfo('⏰ WebSocket close timeout - forcing cleanup');
+                    resolve();
+                }, 2000);
+                
+                clientToCleanup.on('close', () => {
+                    clearTimeout(timeout);
+                    resolve();
+                });
+                
+                // If already closed, resolve immediately
+                if (clientToCleanup.readyState === WebSocket.CLOSED) {
+                    clearTimeout(timeout);
+                    resolve();
+                }
+            });
+        }
+        
+        logInfo('✅ WebSocket cleanup completed');
+        
+    } catch (error) {
+        logError('❌ Error during WebSocket cleanup', error);
+        // wsClient already set to undefined above, so cleanup is guaranteed
+    }
+    
+    // Clear message queue since connection is gone
+    clearMessageQueue();
+}
+
+// Setup WebSocket event handlers with enhanced error recovery
+function setupWebSocketEventHandlers(context: vscode.ExtensionContext, retryCount: number, maxRetries: number) {
+    if (!wsClient) {
+        logError('❌ Cannot setup event handlers - WebSocket client is null');
+        return;
     }
 
     wsClient.on('open', () => {
@@ -432,29 +801,25 @@ async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: 
         logInfo(`   WorkspaceId: ${workspaceId}`);
         logInfo(`   SessionId: ${sessionId}`);
         
-        try {
-            if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-                wsClient.send(JSON.stringify({
-                    type: 'register',
-                    clientType: 'vscode-extension',
-                    workspaceId,
-                    sessionId
-                }));
-                logInfo('📤 Registration message sent to router');
-            } else {
-                logError('❌ WebSocket not available for registration');
-                return;
-            }
-        } catch (error) {
-            logError('❌ Failed to send registration message', error);
-            return;
+        // Use robust message sending
+        const registrationMessage = {
+            type: 'register',
+            clientType: 'vscode-extension',
+            workspaceId,
+            sessionId
+        };
+        
+        if (sendWebSocketMessage(registrationMessage)) {
+            logInfo('📤 Registration message sent to router');
+            // Notify state machine of successful router connection
+            connectionStateMachine.handleRouterConnected();
+            // Process any queued messages now that connection is established
+            processMessageQueue();
+            logInfo('✅ VS Code extension successfully connected to Interactive MCP router - coordinating workspace...');
+        } else {
+            logError('❌ Failed to send registration message - connection may be unstable');
+            connectionStateMachine.handleError('Failed to register with router');
         }
-        
-        // Notify state machine of successful router connection
-        connectionStateMachine.handleRouterConnected();
-        logInfo('✅ VS Code extension successfully connected to Interactive MCP router - coordinating workspace...');
-        
-        // No notifications needed - state machine handles UI updates
     });
 
     wsClient.on('message', async (data: WebSocket.Data) => {
@@ -481,8 +846,11 @@ async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: 
     wsClient.on('close', (code, reason) => {
         logInfo(`WebSocket disconnected from shared router (code: ${code}, reason: ${reason || 'unknown'})`);
         
-        // Clear the wsClient reference
-        wsClient = undefined;
+        // Clear the wsClient reference - this is now handled in cleanup function
+        // wsClient = undefined; // Removed - cleanup function handles this
+        
+        // Clear message queue since connection is lost
+        clearMessageQueue();
         
         // Determine disconnection type
         const isNormalClosure = code === 1000;
@@ -490,49 +858,68 @@ async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: 
         
         if (isNormalClosure || isGoingAway) {
             // Normal disconnection - go to disconnected state
-            logInfo('Normal disconnection from router');
+            logInfo('✅ Normal disconnection from router - transitioning to DISCONNECTED');
             connectionStateMachine.transition('DISCONNECTED');
         } else {
             // Unexpected disconnection - this is an error
-            logInfo(`Unexpected disconnection (code: ${code})`);
+            logInfo(`❌ Unexpected disconnection (code: ${code}) - transitioning to ERROR state`);
             connectionStateMachine.handleError(`Connection lost (code: ${code})`);
             
-            // Auto-reconnect for unexpected disconnections if auto-connect is enabled
+            // Enhanced auto-reconnect with exponential backoff
             const config = vscode.workspace.getConfiguration('interactiveMcp');
             if (config.get<boolean>('autoConnect') && retryCount === 0) {
-                logInfo('Attempting automatic reconnection in 3 seconds...');
+                const reconnectDelay = Math.min(3000 * Math.pow(1.5, retryCount), 10000);
+                logInfo(`🔄 Attempting automatic reconnection in ${reconnectDelay}ms...`);
                 setTimeout(() => {
                     enableInteractiveMcp(context);
-                }, 3000);
+                }, reconnectDelay);
             }
         }
     });
 
     wsClient.on('error', (error: Error) => {
-        logError('WebSocket connection error', error);
+        logError('❌ WebSocket connection error', error);
         
-        // Add retry logic
+        // Clear wsClient reference on error to prevent stale state
+        wsClient = undefined;
+        
+        // Enhanced retry logic with exponential backoff
         if (retryCount < maxRetries) {
             const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000); // Exponential backoff, max 5s
-            logInfo(`Connection failed, retrying in ${retryDelay}ms (attempt ${retryCount + 1}/${maxRetries})`);
+            logInfo(`🔄 Connection failed, retrying in ${retryDelay}ms (attempt ${retryCount + 1}/${maxRetries})`);
             
             setTimeout(() => {
                 connectToMcpServer(context, retryCount + 1);
             }, retryDelay);
         } else {
-            logError('Max connection retries exceeded');
+            logError('❌ Max connection retries exceeded');
             const errorMessage = `Connection failed after ${maxRetries + 1} attempts: ${error.message || 'Unknown error'}`;
             connectionStateMachine.handleError(errorMessage);
         }
     });
 }
 
-function disconnectFromMcpServer() {
-    if (wsClient) {
-        // Remove all listeners to avoid events during cleanup
-        wsClient.removeAllListeners();
-        wsClient.close();
-        wsClient = undefined;
+async function disconnectFromMcpServer() {
+    logInfo('🔌 Disconnecting from MCP server...');
+    
+    // Prevent concurrent disconnect operations
+    if (wsConnectionMutex) {
+        logInfo('⚠️ Disconnect blocked - connection operation in progress, waiting...');
+        // Wait for current operation to complete
+        while (wsConnectionMutex) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+    }
+    
+    wsConnectionMutex = true;
+    
+    try {
+        await cleanupWebSocketConnection();
+        logInfo('✅ Disconnection completed successfully');
+    } catch (error) {
+        logError('❌ Error during disconnection', error);
+    } finally {
+        wsConnectionMutex = false;
     }
 }
 
@@ -542,7 +929,7 @@ async function enableInteractiveMcp(context: vscode.ExtensionContext) {
     
     // Check if state machine allows enable
     if (!connectionStateMachine.handleEnable()) {
-        logInfo('Enable request ignored - not in correct state');
+        logInfo('Enable request ignored - not in correct state or operation in progress');
         return;
     }
     
@@ -558,6 +945,9 @@ async function enableInteractiveMcp(context: vscode.ExtensionContext) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         logError('❌ Failed to enable Interactive MCP tools', error);
         connectionStateMachine.handleError(errorMessage);
+    } finally {
+        // Always release the operation lock
+        connectionStateMachine.releaseOperationLock();
     }
 }
 
@@ -567,40 +957,74 @@ function disableInteractiveMcp() {
     
     // Check if state machine allows disable
     if (!connectionStateMachine.handleDisable()) {
-        logInfo('Disable request ignored - not in correct state');
+        logInfo('Disable request ignored - not in correct state or operation in progress');
         return;
     }
     
-    // Disconnect from router
-    disconnectFromMcpServer();
-    
-    logInfo('✅ Interactive MCP tools disabled');
+    try {
+        // Disconnect from router
+        disconnectFromMcpServer();
+        
+        logInfo('✅ Interactive MCP tools disabled');
+    } finally {
+        // Always release the operation lock
+        connectionStateMachine.releaseOperationLock();
+    }
 }
 
-// Ensure router is running with robust port management
+// Ensure router is running with robust port management and mutex protection
 async function ensureRouterRunning(context: vscode.ExtensionContext): Promise<void> {
     logInfo('🔧 Ensuring router is running...');
     
-    const success = await startSharedRouter(context);
-    if (!success) {
-        // Try a more direct test - maybe the detection failed but router is actually running
+    // Prevent concurrent router startup attempts across all IDE instances
+    if (routerStartupMutex) {
+        logInfo('⚠️ Router startup already in progress, waiting...');
+        // Wait for current startup to complete
+        while (routerStartupMutex) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        // Check if router is now running
         const config = vscode.workspace.getConfiguration("interactiveMcp");
         const port = config.get<number>("serverPort") || 8547;
+        const isRunning = await testIfOurRouter(port);
         
-        logInfo('🔄 Router startup reported failure, testing direct connection...');
-        const isActuallyRunning = await testIfOurRouter(port);
-        
-        if (isActuallyRunning) {
-            logInfo('✅ Router is actually running despite startup failure - proceeding');
+        if (isRunning) {
+            logInfo('✅ Router started by concurrent process - proceeding');
             return;
         }
         
-        // Router is really not working
-        logError('❌ Router startup failed and direct test also failed');
-        throw new Error(`Failed to start Interactive MCP router on port ${port}. This usually means another application is using the port. Please check the output logs for details.`);
+        logInfo('⚠️ Concurrent startup failed, attempting our own startup...');
     }
     
-    logInfo('✅ Router is running and ready');
+    // Acquire mutex
+    routerStartupMutex = true;
+    
+    try {
+        const success = await startSharedRouter(context);
+        if (!success) {
+            // Try a more direct test - maybe the detection failed but router is actually running
+            const config = vscode.workspace.getConfiguration("interactiveMcp");
+            const port = config.get<number>("serverPort") || 8547;
+            
+            logInfo('🔄 Router startup reported failure, testing direct connection...');
+            const isActuallyRunning = await testIfOurRouter(port);
+            
+            if (isActuallyRunning) {
+                logInfo('✅ Router is actually running despite startup failure - proceeding');
+                return;
+            }
+            
+            // Router is really not working
+            logError('❌ Router startup failed and direct test also failed');
+            throw new Error(`Failed to start Interactive MCP router on port ${port}. This usually means another application is using the port. Please check the output logs for details.`);
+        }
+        
+        logInfo('✅ Router is running and ready');
+    } finally {
+        // Always release mutex
+        routerStartupMutex = false;
+    }
 }
 
 function handleWorkspaceSyncComplete(message: any) {
@@ -614,6 +1038,9 @@ function handleWorkspaceSyncComplete(message: any) {
     
     // Notify state machine of successful pairing
     connectionStateMachine.handleWorkspacePaired();
+    
+    // Process any remaining queued messages now that we're fully ready
+    processMessageQueue();
 }
 
 
@@ -639,13 +1066,15 @@ async function handleMcpRequest(message: any) {
                 return;
         }
 
-        // Send response back to MCP server
-        if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-            wsClient.send(JSON.stringify({
-                type: 'response',
-                requestId: message.requestId,
-                response: response
-            }));
+        // Send response back to MCP server using robust message sending
+        const responseMessage = {
+            type: 'response',
+            requestId: message.requestId,
+            response: response
+        };
+        
+        if (!sendWebSocketMessage(responseMessage)) {
+            logError('❌ Failed to send response to MCP server');
         }
     }
 }
@@ -1521,19 +1950,63 @@ async function handleConfirmRequest(options: any): Promise<any> {
 
 
 
+// Enhanced router cleanup function
+function cleanupRouterProcess(): void {
+    if (routerProcess) {
+        logInfo('🧹 Cleaning up router process...');
+        try {
+            // Try graceful termination first
+            routerProcess.kill('SIGTERM');
+            
+            // Force kill after 3 seconds if graceful termination fails
+            const forceKillTimeout = setTimeout(() => {
+                if (routerProcess) {
+                    logInfo('🔪 Force killing router process after timeout');
+                    try {
+                        routerProcess.kill('SIGKILL');
+                    } catch (error) {
+                        logError('Error force killing router process', error);
+                    }
+                    routerProcess = undefined;
+                }
+            }, 3000);
+            
+            // Clear timeout if process exits gracefully
+            routerProcess.once('exit', () => {
+                clearTimeout(forceKillTimeout);
+                logInfo('✅ Router process cleaned up successfully');
+            });
+            
+        } catch (error) {
+            logError('Error during router cleanup', error);
+            routerProcess = undefined;
+        }
+    }
+}
+
 export function deactivate() {
+    logInfo('🛑 Extension deactivating - cleaning up resources...');
+    
+    // Release router startup mutex
+    routerStartupMutex = false;
+    
     if (wsClient) {
-        wsClient.close();
+        try {
+            cleanupWebSocketConnection().catch(error => {
+                logError('Error during WebSocket cleanup in deactivate', error);
+            });
+        } catch (error) {
+            logError('Error during WebSocket cleanup in deactivate', error);
+        }
     }
     if (statusBarItem) {
         statusBarItem.dispose();
     }
     
-    // Clean up the shared router process
-    if (routerProcess) {
-        routerProcess.kill();
-        routerProcess = undefined;
-    }
+    // Enhanced router process cleanup
+    cleanupRouterProcess();
+    
+    logInfo('✅ Extension deactivation complete');
 }
 
 
@@ -1666,9 +2139,9 @@ function getWorkspaceId(context: vscode.ExtensionContext): string {
     return path.resolve(context.extensionPath);
 }
 
-// Start shared router with smart port conflict resolution
+// Start shared router with atomic port checking and router startup
 async function startSharedRouter(context: vscode.ExtensionContext): Promise<boolean> {
-    logInfo('Starting shared router with smart port management...');
+    logInfo('Starting shared router with atomic port management...');
     
     if (routerProcess) {
         logInfo("Router process already running in this instance");
@@ -1678,15 +2151,15 @@ async function startSharedRouter(context: vscode.ExtensionContext): Promise<bool
     const config = vscode.workspace.getConfiguration("interactiveMcp");
     const port = config.get<number>("serverPort") || 8547;
     
-    logInfo(`Checking port ${port} status...`);
+    logInfo(`Performing atomic port check and router startup on port ${port}...`);
     
-    // Step 1: Check if something is using the port
-    const processInfo = await getProcessUsingPort(port);
+    // Atomic operation: check port and start router without race condition window
+    let processInfo = await getProcessUsingPort(port);
     
     if (processInfo) {
         logInfo(`Port ${port} is occupied by PID ${processInfo.pid}`);
         
-        // Step 2: Test if it's our router
+        // Test if it's our router
         const isOurRouter = await testIfOurRouter(port);
         
         if (isOurRouter) {
@@ -1700,6 +2173,14 @@ async function startSharedRouter(context: vscode.ExtensionContext): Promise<bool
                 logInfo(`Successfully terminated PID ${processInfo.pid}`);
                 // Wait a moment for port to be freed
                 await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Re-check port status after termination to ensure it's actually free
+                processInfo = await getProcessUsingPort(port);
+                if (processInfo) {
+                    logError(`Port ${port} still occupied after termination attempt`);
+                    vscode.window.showErrorMessage(`Port ${port} is still occupied and cannot be freed. Please close the application using this port.`);
+                    return false;
+                }
             } else {
                 logError(`Failed to terminate PID ${processInfo.pid}`);
                 vscode.window.showErrorMessage(`Port ${port} is occupied and cannot be freed. Please close the application using this port.`);
@@ -1710,7 +2191,7 @@ async function startSharedRouter(context: vscode.ExtensionContext): Promise<bool
         logInfo(`Port ${port} is free`);
     }
     
-    // Step 3: Start new router
+    // Start new router immediately after confirming port is free
     return await startNewRouter(context, port);
 }
 
@@ -1777,30 +2258,54 @@ async function startNewRouter(context: vscode.ExtensionContext, port: number): P
 
         routerProcess.on("close", (code) => {
             logInfo(`Router exited with code ${code}`);
+            
+            // Enhanced cleanup on router process termination
+            if (code !== 0 && code !== null) {
+                logError(`❌ Router process exited unexpectedly with code ${code}`);
+                // Additional cleanup for unexpected termination
+                if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+                    logInfo('🔌 Closing WebSocket connection due to router failure');
+                    wsClient.close();
+                }
+            }
+            
             routerProcess = undefined;
         });
 
         routerProcess.on("error", (error) => {
             logError("Failed to start router", error);
-            routerProcess = undefined;
+            // Ensure proper cleanup on router startup failure
+            if (routerProcess) {
+                try {
+                    routerProcess.kill('SIGTERM');
+                    // Force kill after 2 seconds if graceful termination fails
+                    setTimeout(() => {
+                        if (routerProcess) {
+                            logInfo('🔪 Force killing unresponsive router process');
+                            routerProcess.kill('SIGKILL');
+                        }
+                    }, 2000);
+                } catch (killError) {
+                    logError('Error during router process cleanup', killError);
+                }
+                routerProcess = undefined;
+            }
         });
 
-        // Wait for startup and verify
-        logInfo('⏳ Waiting 2 seconds for router to start...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Use adaptive health check instead of fixed delay
+        logInfo('🏥 Performing adaptive health check for router startup...');
         
         if (routerProcess) {
-            logInfo(`🔍 Testing router connection on port ${port}...`);
-            const isListening = await testRouterConnection(port);
+            const isHealthy = await waitForRouterHealth(port, 10000); // 10 second max wait
             
-            if (isListening) {
+            if (isHealthy) {
                 logInfo(`✅ Router successfully started and responding on port ${port}`);
                 const workspaceId = getWorkspaceId(context);
                 logInfo(`📁 Workspace: ${workspaceId}`);
                 logInfo(`🎯 Router startup complete - ready for connections`);
                 return true;
             } else {
-                logError('❌ Router process running but not responding to connections');
+                logError('❌ Router process running but failed health check');
                 logInfo('💀 Terminating unresponsive router process');
                 if (routerProcess) {
                     routerProcess.kill();
@@ -1818,25 +2323,47 @@ async function startNewRouter(context: vscode.ExtensionContext, port: number): P
     }
 }
 
-// Check what process is using a port
+// Check what process is using a port with enhanced error handling
 async function getProcessUsingPort(port: number): Promise<{ pid: number; command: string } | null> {
     return new Promise((resolve) => {
         // Try different commands based on platform
         const isWindows = process.platform === 'win32';
-        const command = isWindows 
-            ? `netstat -ano | findstr :${port}` 
+        const command = isWindows
+            ? `netstat -ano | findstr :${port}`
             : `lsof -ti:${port} 2>/dev/null || ss -tlnp | grep :${port}`;
+        
+        logDebug(`🔍 Checking port ${port} with command: ${command}`);
         
         const { spawn } = require('child_process');
         const proc = spawn('sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'] });
         
         let output = '';
+        let errorOutput = '';
+        
         proc.stdout.on('data', (data: Buffer) => {
             output += data.toString();
         });
         
-        proc.on('close', () => {
+        proc.stderr.on('data', (data: Buffer) => {
+            errorOutput += data.toString();
+        });
+        
+        // Add timeout to prevent hanging
+        const timeout = setTimeout(() => {
+            logDebug(`⏰ Port check timed out for port ${port}`);
+            proc.kill();
+            resolve(null);
+        }, 5000);
+        
+        proc.on('close', (code: number | null) => {
+            clearTimeout(timeout);
+            
+            if (code !== 0 && errorOutput) {
+                logDebug(`Port check command failed with code ${code}: ${errorOutput}`);
+            }
+            
             if (!output.trim()) {
+                logDebug(`✅ Port ${port} is free`);
                 resolve(null);
                 return;
             }
@@ -1849,6 +2376,7 @@ async function getProcessUsingPort(port: number): Promise<{ pid: number; command
                         const parts = lines[0].trim().split(/\s+/);
                         const pid = parseInt(parts[parts.length - 1]);
                         if (!isNaN(pid)) {
+                            logDebug(`🔍 Port ${port} occupied by PID ${pid}`);
                             resolve({ pid, command: 'unknown' });
                             return;
                         }
@@ -1857,6 +2385,7 @@ async function getProcessUsingPort(port: number): Promise<{ pid: number; command
                     // Parse Unix lsof/ss output
                     const pid = parseInt(output.trim().split('\n')[0]);
                     if (!isNaN(pid)) {
+                        logDebug(`🔍 Port ${port} occupied by PID ${pid}`);
                         resolve({ pid, command: 'unknown' });
                         return;
                     }
@@ -1865,10 +2394,15 @@ async function getProcessUsingPort(port: number): Promise<{ pid: number; command
                 logDebug('Error parsing port check output: ' + error);
             }
             
+            logDebug(`❓ Could not determine port ${port} status from output: ${output}`);
             resolve(null);
         });
         
-        proc.on('error', () => resolve(null));
+        proc.on('error', (error: Error) => {
+            clearTimeout(timeout);
+            logDebug(`Port check command error: ${error.message}`);
+            resolve(null);
+        });
     });
 }
 
@@ -1967,6 +2501,36 @@ async function testIfOurRouter(port: number): Promise<boolean> {
             resolve(false);
         }
     });
+}
+
+// Adaptive health check that polls router readiness with exponential backoff
+async function waitForRouterHealth(port: number, maxWaitMs: number = 10000): Promise<boolean> {
+    const startTime = Date.now();
+    let attempt = 0;
+    const maxAttempts = 20;
+    
+    logInfo(`🏥 Starting adaptive health check for router on port ${port}...`);
+    
+    while (Date.now() - startTime < maxWaitMs && attempt < maxAttempts) {
+        attempt++;
+        const delay = Math.min(100 * Math.pow(1.5, attempt - 1), 1000); // Exponential backoff, max 1s
+        
+        logDebug(`🔍 Health check attempt ${attempt}/${maxAttempts} (delay: ${delay}ms)`);
+        
+        const isHealthy = await testRouterConnection(port);
+        if (isHealthy) {
+            const elapsed = Date.now() - startTime;
+            logInfo(`✅ Router health confirmed after ${elapsed}ms (${attempt} attempts)`);
+            return true;
+        }
+        
+        // Wait before next attempt
+        await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    
+    const elapsed = Date.now() - startTime;
+    logError(`❌ Router health check failed after ${elapsed}ms (${attempt} attempts)`);
+    return false;
 }
 
 // Test if router is actually listening on the expected port

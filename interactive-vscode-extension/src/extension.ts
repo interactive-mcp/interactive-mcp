@@ -392,10 +392,11 @@ async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: 
 
     if (wsClient && wsClient.readyState === WebSocket.OPEN) {
         logInfo('Already connected to Interactive MCP router');
-        // Force clean slate - close existing connection and reconnect
+        // Force clean slate - close existing connection and wait for it to close
         logInfo('Closing existing connection to ensure clean state');
         disconnectFromMcpServer();
-        // Continue with fresh connection
+        // Wait a bit for the close to process
+        await new Promise(resolve => setTimeout(resolve, 100));
     }
 
     // Try to start shared router if auto-start is enabled
@@ -432,13 +433,18 @@ async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: 
         logInfo(`   SessionId: ${sessionId}`);
         
         try {
-            wsClient!.send(JSON.stringify({
-                type: 'register',
-                clientType: 'vscode-extension',
-                workspaceId,
-                sessionId
-            }));
-            logInfo('📤 Registration message sent to router');
+            if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+                wsClient.send(JSON.stringify({
+                    type: 'register',
+                    clientType: 'vscode-extension',
+                    workspaceId,
+                    sessionId
+                }));
+                logInfo('📤 Registration message sent to router');
+            } else {
+                logError('❌ WebSocket not available for registration');
+                return;
+            }
         } catch (error) {
             logError('❌ Failed to send registration message', error);
             return;
@@ -523,6 +529,8 @@ async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: 
 
 function disconnectFromMcpServer() {
     if (wsClient) {
+        // Remove all listeners to avoid events during cleanup
+        wsClient.removeAllListeners();
         wsClient.close();
         wsClient = undefined;
     }

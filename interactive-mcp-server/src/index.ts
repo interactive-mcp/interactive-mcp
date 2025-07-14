@@ -4,6 +4,7 @@ import { z } from "zod";
 import WebSocket from "ws";
 import { createHash } from "crypto";
 import * as path from "path";
+import { normalizeWorkspacePath, areWorkspacePathsRelated } from "./path-utils.js";
 
 // Shared router connection
 let routerClient: WebSocket | undefined;
@@ -137,18 +138,15 @@ function handleWorkspaceSyncRequest(message: any): void {
   
   try {
     // Simple workspace matching logic - normalize paths and check if they're compatible
-    const normalizedVscodeWorkspace = path.resolve(vscodeWorkspace);
-    const normalizedMcpWorkspace = path.resolve(mcpWorkspace);
+    const normalizedVscodeWorkspace = normalizeWorkspacePath(vscodeWorkspace);
+    const normalizedMcpWorkspace = normalizeWorkspacePath(mcpWorkspace);
     
     console.error(`[MCP] 🔍 Normalized paths:`);
     console.error(`[MCP]    VS Code: ${normalizedVscodeWorkspace}`);
     console.error(`[MCP]    MCP: ${normalizedMcpWorkspace}`);
     
-    // Check if workspaces are the same or if MCP workspace is a parent/child of VS Code workspace
-    const isWorkspaceMatch = 
-      normalizedVscodeWorkspace === normalizedMcpWorkspace ||
-      normalizedVscodeWorkspace.startsWith(normalizedMcpWorkspace) ||
-      normalizedMcpWorkspace.startsWith(normalizedVscodeWorkspace);
+    // Check if workspaces are related (exact match or parent-child relationship)
+    const isWorkspaceMatch = areWorkspacePathsRelated(normalizedVscodeWorkspace, normalizedMcpWorkspace);
     
     console.error(`[MCP] 🎯 Workspace match result: ${isWorkspaceMatch}`);
     

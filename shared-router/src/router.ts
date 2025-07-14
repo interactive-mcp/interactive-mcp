@@ -1,5 +1,5 @@
 import WebSocket, { WebSocketServer } from 'ws';
-import { normalizeWorkspacePath, areWorkspacePathsEqual, generateSessionId } from './path-utils.js';
+import { normalizeWorkspacePath, areWorkspacePathsEqual, areWorkspacePathsRelated, generateSessionId } from './path-utils.js';
 
 /**
  * Shared WebSocket Router for Interactive MCP
@@ -160,6 +160,9 @@ export class SharedRouter {
     if (clientType === 'mcp-server') {
       this.unmatchedMcpServers.set(sessionId, clientInfo);
       console.log(`[SharedRouter] Registered unmatched MCP server: ${sessionId} for workspace: ${normalizedWorkspaceId}`);
+      
+      // When MCP server connects, immediately try to coordinate with unmatched VS Code clients
+      this.initiateWorkspaceCoordinationForMcp(clientInfo);
     } else if (clientType === 'vscode-extension') {
       this.unmatchedVscodeClients.set(sessionId, clientInfo);
       console.log(`[SharedRouter] Registered unmatched VS Code extension: ${sessionId} for workspace: ${normalizedWorkspaceId}`);
@@ -434,6 +437,37 @@ export class SharedRouter {
         });
       } catch (error) {
         console.error(`[SharedRouter] Failed to send workspace sync request to MCP ${mcpSessionId}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Initiate workspace coordination when MCP server connects
+   */
+  private initiateWorkspaceCoordinationForMcp(mcpClient: ClientInfo): void {
+    console.log(`[SharedRouter] Initiating workspace coordination for MCP server: ${mcpClient.sessionId}`);
+    console.log(`[SharedRouter] MCP workspace: ${mcpClient.workspaceId}`);
+    
+    if (this.unmatchedVscodeClients.size === 0) {
+      console.log(`[SharedRouter] No unmatched VS Code clients available for coordination`);
+      return;
+    }
+    
+    // Send workspace sync request to the MCP server for each unmatched VS Code client
+    for (const [vscodeSessionId, vscodeClient] of this.unmatchedVscodeClients) {
+      console.log(`[SharedRouter] Sending workspace sync request to MCP server for VS Code: ${vscodeSessionId}`);
+      console.log(`[SharedRouter] VS Code workspace: ${vscodeClient.workspaceId}`);
+      
+      try {
+        this.sendMessage(mcpClient.ws, {
+          type: 'workspace-sync-request',
+          vscodeWorkspace: vscodeClient.workspaceId,
+          vscodeSessionId: vscodeClient.sessionId,
+          mcpWorkspace: mcpClient.workspaceId,
+          mcpSessionId: mcpClient.sessionId
+        });
+      } catch (error) {
+        console.error(`[SharedRouter] Failed to send workspace sync request to MCP ${mcpClient.sessionId}:`, error);
       }
     }
   }

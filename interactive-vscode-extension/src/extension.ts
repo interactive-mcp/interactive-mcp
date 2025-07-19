@@ -154,10 +154,10 @@ class ConnectionStateMachine {
                 // Will be handled by the enable function
                 break;
             case 'CONNECTED':
-                // Set pairing timeout
+                // Set pairing timeout (extended to allow for aggressive tool refresh)
                 this.pairingTimeout = setTimeout(() => {
                     this.transition('ERROR', { error: 'Workspace pairing timed out. Make sure Claude Desktop is running with Interactive MCP configured.' });
-                }, 10000);
+                }, 15000); // Extended from 10s to 15s to allow tool refresh to work
                 break;
             case 'READY':
                 // Success! No special setup needed
@@ -167,6 +167,10 @@ class ConnectionStateMachine {
                 if (data?.error) {
                     logError('Connection error: ' + data.error);
                 }
+                
+                // Critical: Clean up server processes to allow restart
+                logInfo('🧹 Cleaning up server processes after error to enable restart...');
+                cleanupAfterError();
                 break;
             default:
                 break;
@@ -800,6 +804,52 @@ async function cleanupWebSocketConnection(): Promise<void> {
     clearMessageQueue();
 }
 
+// Critical cleanup after error to allow restart
+async function cleanupAfterError(): Promise<void> {
+    logInfo('🧹 Starting comprehensive cleanup after error...');
+    
+    try {
+        // 1. Clean up WebSocket connection
+        await cleanupWebSocketConnection();
+        
+        // 2. Clean up MCP server process
+        if (mcpServerProcess) {
+            logInfo('🔪 Terminating MCP server process after error...');
+            try {
+                mcpServerProcess.kill('SIGTERM');
+                
+                // Force kill if needed
+                setTimeout(() => {
+                    if (mcpServerProcess && !mcpServerProcess.killed) {
+                        logInfo('🔪 Force killing MCP server after timeout');
+                        mcpServerProcess.kill('SIGKILL');
+                    }
+                }, 2000);
+                
+                mcpServerProcess = undefined;
+                logInfo('✅ MCP server process cleaned up');
+            } catch (error) {
+                logError('❌ Error cleaning up MCP server process', error);
+                mcpServerProcess = undefined; // Force clear reference
+            }
+        }
+        
+        // 3. Clean up router process if we started it
+        cleanupRouterProcess();
+        
+        // 4. Reset connection state
+        wasConnectedBefore = false; // Reset reconnection tracking
+        
+        logInfo('✅ Comprehensive cleanup completed - ready for clean restart');
+        
+    } catch (error) {
+        logError('❌ Error during comprehensive cleanup', error);
+        // Force clear all references to ensure clean state
+        wsClient = undefined;
+        mcpServerProcess = undefined;
+    }
+}
+
 // Setup WebSocket event handlers with enhanced error recovery
 function setupWebSocketEventHandlers(context: vscode.ExtensionContext, retryCount: number, maxRetries: number) {
     if (!wsClient) {
@@ -831,6 +881,19 @@ function setupWebSocketEventHandlers(context: vscode.ExtensionContext, retryCoun
             logInfo(`📊 Registration details: WorkspaceId=${workspaceId}, SessionId=${sessionId}`);
             // Notify state machine of successful router connection
             connectionStateMachine.handleRouterConnected();
+            
+            // Send pairing-ready signal to trigger IDE MCP tool discovery
+            const pairingReadyMessage = {
+                type: 'pairing-ready',
+                workspaceId,
+                sessionId,
+                isReconnection: wasConnectedBefore
+            };
+            
+            if (sendWebSocketMessage(pairingReadyMessage)) {
+                logInfo('📢 Pairing-ready signal sent to help IDE detect MCP tools');
+            }
+            
             // Process any queued messages now that connection is established
             processMessageQueue();
             logInfo('✅ VS Code extension successfully connected to Interactive MCP router - coordinating workspace...');
@@ -848,11 +911,49 @@ function setupWebSocketEventHandlers(context: vscode.ExtensionContext, retryCoun
                 logInfo('✅ Registration confirmed by router');
             } else if (message.type === 'heartbeat') {
                 logDebug('💓 Heartbeat received from router');
+            } else if (message.type === 'tools-available-heartbeat') {
+                logInfo('💓 Tools-available heartbeat received - MCP tools are ready for IDE detection');
+                // Show a brief status to help users understand pairing is in progress
+                const currentState = connectionStateMachine.getCurrentState();
+                if (currentState === 'CONNECTED') {
+                    logInfo('🔄 Pairing in progress - tools should be detectable by IDE now');
+                }
+            } else if (message.type === 'tool-refresh-complete') {
+                logInfo('✅ Tool refresh complete - MCP tools should now be detectable by IDE without manual toggle');
             } else if (message.type === 'workspace-sync-complete') {
                 handleWorkspaceSyncComplete(message);
             } else if (message.type === 'request') {
-                // Handle tool requests
-                await handleMcpRequest(message);
+                // Handle tool requests - queue if still pairing
+                const currentState = connectionStateMachine.getCurrentState();
+                if (currentState === 'CONNECTED') {
+                    // Still pairing - queue the request and send auto-retry signal
+                    logInfo('📦 Request received during pairing - queueing and triggering auto-retry');
+                    queueMessage(message);
+                    
+                    // Send auto-retry trigger to IDE to re-detect MCP tools
+                    const retryTriggerMessage = {
+                        type: 'auto-retry-trigger',
+                        workspaceId,
+                        sessionId,
+                        reason: 'pairing-in-progress'
+                    };
+                    sendWebSocketMessage(retryTriggerMessage);
+                    
+                    // Also respond immediately with a pairing status
+                    const pairingStatusResponse = {
+                        type: 'response',
+                        requestId: message.requestId,
+                        response: {
+                            type: 'pairing_status',
+                            status: 'pairing',
+                            message: 'Extension is still pairing with MCP server. Please wait...'
+                        }
+                    };
+                    sendWebSocketMessage(pairingStatusResponse);
+                } else {
+                    // Ready to handle requests normally
+                    await handleMcpRequest(message);
+                }
             } else {
                 logInfo(`📥 Received ${message.type} message from router`);
             }
@@ -941,9 +1042,18 @@ async function disconnectFromMcpServer() {
     }
 }
 
+// Track if this is a manual reconnection (after being previously connected)
+let wasConnectedBefore = false;
+
 // New simplified enable function - uses state machine for reliability
 async function enableInteractiveMcp(context: vscode.ExtensionContext) {
     logInfo('🚀 Enabling Interactive MCP tools...');
+    
+    // Detect if this is a manual reconnection
+    const isManualReconnection = wasConnectedBefore;
+    if (isManualReconnection) {
+        logInfo('🔄 Detected manual reconnection - will use aggressive tool refresh');
+    }
     
     // Check if state machine allows enable
     if (!connectionStateMachine.handleEnable()) {
@@ -952,6 +1062,14 @@ async function enableInteractiveMcp(context: vscode.ExtensionContext) {
     }
     
     try {
+        // Step 0: Clean up any stale processes from previous failed attempts
+        if (isManualReconnection) {
+            logInfo('🧹 Cleaning up any stale processes before reconnection...');
+            await cleanupAfterError();
+            // Brief pause to ensure cleanup completes
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
         // Step 1: Ensure router is running (this handles port conflicts)
         await ensureRouterRunning(context);
         
@@ -992,6 +1110,23 @@ function disableInteractiveMcp() {
     }
     
     try {
+        // Send disconnection signal to help IDE clear tool cache
+        if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+            const disconnectionMessage = {
+                type: 'manual-disconnection',
+                workspaceId,
+                sessionId,
+                timestamp: Date.now()
+            };
+            
+            try {
+                wsClient.send(JSON.stringify(disconnectionMessage));
+                logInfo('📤 Sent manual disconnection signal to clear IDE cache');
+            } catch (error) {
+                // Ignore send errors during disconnection
+            }
+        }
+        
         // Disconnect from router
         disconnectFromMcpServer();
         
@@ -1069,6 +1204,9 @@ function handleWorkspaceSyncComplete(message: any) {
     
     // Notify state machine of successful pairing
     connectionStateMachine.handleWorkspacePaired();
+    
+    // Mark that we've been connected before (for reconnection detection)
+    wasConnectedBefore = true;
     
     // Process any remaining queued messages now that we're fully ready
     processMessageQueue();

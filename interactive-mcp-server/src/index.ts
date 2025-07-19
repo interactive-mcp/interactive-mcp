@@ -90,6 +90,45 @@ function connectToRouter(): Promise<void> {
           handleWorkspaceSyncRequest(message);
         } else if (message.type === 'workspace-sync-complete') {
           handleWorkspaceSyncComplete(message);
+        } else if (message.type === 'pairing-ready') {
+          const isReconnection = message.isReconnection || false;
+          console.error(`[MCP] 📢 VS Code extension is pairing-ready ${isReconnection ? '(RECONNECTION)' : '(INITIAL)'} - triggering tool refresh for IDE`);
+          
+          if (isReconnection) {
+            // More aggressive refresh for manual reconnections
+            console.error('[MCP] 🔄 Applying aggressive reconnection refresh sequence');
+            
+            // Multiple refresh cycles for reconnections
+            forceToolRefresh();
+            setTimeout(() => forceToolRefresh(), 500);
+            setTimeout(() => forceToolRefresh(), 1000);
+            setTimeout(() => forceToolRefresh(), 1500);
+          } else {
+            // Standard refresh for initial connections
+            forceToolRefresh();
+          }
+        } else if (message.type === 'auto-retry-trigger') {
+          console.error(`[MCP] 🔄 Auto-retry triggered: ${message.reason}`);
+          // Force tool re-registration to help IDE detect availability
+          setTimeout(() => {
+            if (routerClient && routerClient.readyState === WebSocket.OPEN) {
+              console.error('[MCP] 🔧 Re-registering tools to help IDE detection');
+              registerTools();
+            }
+          }, 500);
+        } else if (message.type === 'manual-disconnection') {
+          console.error('[MCP] 🔌 Manual disconnection detected - clearing tool state for clean reconnection');
+          
+          // Reset tool registration state to ensure clean reconnection
+          toolsRegistered = false;
+          
+          // Clear any ongoing heartbeat
+          if (autoDetectionInterval) {
+            clearInterval(autoDetectionInterval);
+            autoDetectionInterval = null;
+          }
+          
+          console.error('[MCP] 🧹 Tool state cleared - ready for clean reconnection');
         }
       } catch (error) {
         // Silently ignore parsing errors to avoid corrupting MCP stdio
@@ -260,6 +299,89 @@ async function requestUserInput(
   });
 }
 
+// Auto-detection heartbeat to help IDE detect tools during pairing
+let autoDetectionInterval: NodeJS.Timeout | null = null;
+
+// Force tool refresh to help IDE detect tools during pairing
+function forceToolRefresh(): void {
+  console.error('[MCP] 🔄 Starting forced tool refresh sequence for IDE detection');
+  
+  // Strategy: Reset toolsRegistered flag and re-register tools
+  // This simulates what happens when user toggles MCP tools off/on
+  setTimeout(() => {
+    console.error('[MCP] 🧹 Step 1: Clearing tool registration state');
+    toolsRegistered = false;
+    
+    // Brief pause, then re-register
+    setTimeout(() => {
+      console.error('[MCP] 🔧 Step 2: Re-registering tools to trigger IDE refresh');
+      registerTools();
+      
+      // Send additional notification
+      if (routerClient && routerClient.readyState === WebSocket.OPEN) {
+        const refreshCompleteMessage = {
+          type: 'tool-refresh-complete',
+          workspaceId,
+          sessionId,
+          timestamp: Date.now()
+        };
+        
+        try {
+          routerClient.send(JSON.stringify(refreshCompleteMessage));
+          console.error('[MCP] ✅ Tool refresh complete - IDE should detect tools now');
+        } catch (error) {
+          console.error('[MCP] ❌ Failed to send refresh complete message');
+        }
+      }
+    }, 100);
+  }, 100);
+}
+
+function startAutoDetectionHeartbeat(): void {
+  // Clear any existing interval
+  if (autoDetectionInterval) {
+    clearInterval(autoDetectionInterval);
+  }
+  
+  let heartbeatCount = 0;
+  
+  // Send periodic signals to help IDE detect tools during pairing
+  autoDetectionInterval = setInterval(() => {
+    if (routerClient && routerClient.readyState === WebSocket.OPEN && !isRouterReady) {
+      heartbeatCount++;
+      
+      // Only send during pairing (when router connected but not ready)
+      const heartbeatMessage = {
+        type: 'tools-available-heartbeat',
+        workspaceId,
+        sessionId,
+        timestamp: Date.now(),
+        count: heartbeatCount
+      };
+      
+      try {
+        routerClient.send(JSON.stringify(heartbeatMessage));
+        console.error(`[MCP] 💓 Sent tools-available heartbeat during pairing (${heartbeatCount})`);
+        
+        // Trigger additional tool refresh every 3rd heartbeat for more aggressive detection
+        if (heartbeatCount % 3 === 0) {
+          console.error('[MCP] 🔄 Triggering additional tool refresh via heartbeat');
+          setTimeout(() => forceToolRefresh(), 200);
+        }
+      } catch (error) {
+        // Ignore send errors during heartbeat
+      }
+    } else if (isRouterReady && autoDetectionInterval) {
+      // Stop heartbeat once pairing is complete
+      clearInterval(autoDetectionInterval);
+      autoDetectionInterval = null;
+      console.error('[MCP] ✅ Pairing complete - stopping auto-detection heartbeat');
+    }
+  }, 2000); // Send every 2 seconds during pairing
+  
+  console.error('[MCP] 💓 Started aggressive auto-detection heartbeat for IDE pairing');
+}
+
 // Tool registration - can be called multiple times safely
 function registerTools(): void {
   if (toolsRegistered) {
@@ -268,6 +390,9 @@ function registerTools(): void {
   }
   
   console.error('[MCP] 🔧 Registering tools after router connection');
+  
+  // Start auto-detection heartbeat to help IDE during pairing
+  startAutoDetectionHeartbeat();
   
   // Tool: Ask user with buttons
   server.tool(

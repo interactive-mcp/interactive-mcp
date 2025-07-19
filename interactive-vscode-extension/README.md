@@ -2,7 +2,9 @@
 
 Transform your AI conversations with seamless interactive prompts directly in VS Code, Cursor, Windsurf, and other VS Code-based editors. Never lose your flow when AI assistants need user input!
 
-![Example Interactive Popup](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example.png)
+![Example Interactive Popup](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example-1.png)
+
+![Example Interactive Popup](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example-2.png)
 
 ## ✨ What This Extension Does
 
@@ -22,7 +24,7 @@ All responses go directly back to your AI conversation seamlessly.
 - **🔒 Privacy First**: Everything runs locally on your machine
 - **📊 Connection Status**: Always know if your extension is ready in the status bar
 
-## What's New in Version 0.3.2
+## What's New in Version 0.3.3
 
 - Fixed image display in VS Code Extensions Marketplace  
 - Improved README presentation with better visual examples

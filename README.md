@@ -45,7 +45,7 @@ AI Assistant → MCP Server → VS Code Extension → Interactive Popups
   - Text input with custom responses
   - Yes/No confirmation dialogs
 
-## What's New in Version 0.3.0
+## What's New in Version 0.3.1
 
 - Connection in multiple IDEs is now possible, enabling multi-instance and multi-workspace support.
 

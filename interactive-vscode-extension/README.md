@@ -22,7 +22,7 @@ All responses go directly back to your AI conversation seamlessly.
 - **🔒 Privacy First**: Everything runs locally on your machine
 - **📊 Connection Status**: Always know if your extension is ready in the status bar
 
-## What's New in Version 0.3.0
+## What's New in Version 0.3.1
 
 - Connection in multiple IDEs is now possible, enabling multi-instance and multi-workspace support.
 - Popups support Markdown text

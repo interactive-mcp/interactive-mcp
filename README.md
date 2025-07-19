@@ -45,6 +45,10 @@ AI Assistant → MCP Server → VS Code Extension → Interactive Popups
   - Text input with custom responses
   - Yes/No confirmation dialogs
 
+## What's New in Version 0.3.0
+
+- Connection in multiple IDEs is now possible, enabling multi-instance and multi-workspace support.
+
 ## 🚀 Quick Start
 
 ### For Users
@@ -103,6 +107,8 @@ The configuration depends on which AI assistant you're using. Here's the general
 
 4. **Restart your IDE** completely
 
+**Note on Updates:** If you update the extension, you may need to update the path in your MCP JSON config file. Use the command palette ("Interactive MCP: Copy MCP JSON Configuration") to get the latest configuration and update your file accordingly.
+
 #### 🔌 **Step 4: Connect the Extension**
 
 1. **Check the status bar** at the bottom of your editor
@@ -139,6 +145,9 @@ The configuration depends on which AI assistant you're using. Here's the general
 - Make sure you're asking questions that require user input
 - Try asking: "Please ask me to confirm something"
 - You can add a Rule instructing the AI to always end their responses with a question and an interactive-mcp tool
+
+**If the connection button hangs during Pairing?**
+- Just toggle the MCP tool switch off and back on during pairing. That should make the connection succeed.
 
 ### For Developers
 

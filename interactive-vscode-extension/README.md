@@ -20,6 +20,10 @@ All responses go directly back to your AI conversation seamlessly.
 - **🔒 Privacy First**: Everything runs locally on your machine
 - **📊 Connection Status**: Always know if your extension is ready in the status bar
 
+## What's New in Version 0.3.0
+
+- Connection in multiple IDEs is now possible, enabling multi-instance and multi-workspace support.
+
 ## 🎬 How It Works
 
 1. Install this extension in your VS Code-based editor
@@ -76,6 +80,8 @@ After installation, click "Copy MCP JSON Configuration" from the welcome notific
 
 3. Restart your AI assistant
 
+**Note on Updates:** If you update the extension, you may need to update the path in your MCP JSON config file. Use the command palette ("Interactive MCP: Copy MCP JSON Configuration") to get the latest configuration and update your file accordingly.
+
 ### Step 4: Start Using
 
 That's it! When your AI assistant needs your input, you'll see popups in your editor automatically.
@@ -116,6 +122,9 @@ Customize the extension via: **File > Preferences > Settings > Extensions > Inte
 **Need help?**
 - Use the Command Palette (Ctrl+Shift+P) and search for "Interactive MCP" commands
 - Check the extension's output panel in your editor for error messages
+
+**If the connection button hangs during Pairing?**
+- Just toggle the MCP tool switch off and back on during pairing. That should make the connection succeed.
 
 ## 📄 License
 

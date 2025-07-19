@@ -508,8 +508,10 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 async function startLocalMcpServer(context: vscode.ExtensionContext): Promise<boolean> {
+    logInfo('🔧 Starting MCP server for automatic connection...');
+    
     if (mcpServerProcess) {
-        logInfo('MCP server already running in this instance');
+        logInfo('✅ MCP server already running in this instance');
         return true;
     }
 
@@ -517,25 +519,29 @@ async function startLocalMcpServer(context: vscode.ExtensionContext): Promise<bo
     const config = vscode.workspace.getConfiguration('interactiveMcp');
     const port = config.get<number>('serverPort') || 8547;
     
+    logInfo(`🔍 Checking if MCP server is already running on port ${port}...`);
+    
     try {
         // Try to connect to see if server is already running
         const testSocket = new (require('ws'))(`ws://localhost:${port}`);
         
         return new Promise((resolve) => {
             testSocket.on('open', () => {
-                logInfo(`MCP server already running on port ${port} (started by another instance)`);
+                logInfo(`✅ MCP server already running on port ${port} (started by another instance)`);
                 testSocket.close();
                 resolve(true);
             });
             
             testSocket.on('error', () => {
                 // No server running, we should start one
+                logInfo('🚀 No existing MCP server found, starting new instance...');
                 testSocket.close();
                 startNewServer(context).then(resolve);
             });
         });
     } catch (error) {
         // Fallback to starting new server
+        logInfo('🚀 Fallback to starting new MCP server...');
         return startNewServer(context);
     }
 }
@@ -545,11 +551,13 @@ async function startNewServer(context: vscode.ExtensionContext): Promise<boolean
         const serverPath = getServerPath(context);
         
         if (!serverPath) {
-            vscode.window.showErrorMessage('MCP server not found. Please ensure the extension is properly installed.');
+            const errorMsg = 'MCP server not found. Please ensure the extension is properly installed.';
+            logError('❌ ' + errorMsg);
+            vscode.window.showErrorMessage(errorMsg);
             return false;
         }
 
-        logInfo('Starting MCP server at: ' + serverPath);
+        logInfo('🚀 Starting new MCP server instance at: ' + serverPath);
         
         mcpServerProcess = spawn('node', [serverPath], {
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -570,18 +578,27 @@ async function startNewServer(context: vscode.ExtensionContext): Promise<boolean
         });
 
         mcpServerProcess.on('error', (error) => {
-            logError('Failed to start MCP server', error);
+            logError('❌ Failed to start MCP server automatically', error);
             mcpServerProcess = undefined;
-            vscode.window.showErrorMessage(`Failed to start MCP server: ${error.message}`);
+            vscode.window.showErrorMessage(`Failed to start MCP server automatically: ${error.message}`);
         });
 
         // Wait a moment for the server to start
+        logInfo('⏳ Waiting for MCP server to initialize...');
         await new Promise(resolve => setTimeout(resolve, 3000));
         
-        return mcpServerProcess !== undefined;
+        const success = mcpServerProcess !== undefined;
+        if (success) {
+            logInfo('✅ MCP server started successfully and ready for connections');
+        } else {
+            logError('❌ MCP server failed to start within timeout period');
+        }
+        
+        return success;
     } catch (error) {
-        logError('Error starting MCP server', error);
-        vscode.window.showErrorMessage(`Error starting MCP server: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        const errorMsg = `Error starting MCP server automatically: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        logError('❌ ' + errorMsg);
+        vscode.window.showErrorMessage(errorMsg);
         return false;
     }
 }
@@ -811,6 +828,7 @@ function setupWebSocketEventHandlers(context: vscode.ExtensionContext, retryCoun
         
         if (sendWebSocketMessage(registrationMessage)) {
             logInfo('📤 Registration message sent to router');
+            logInfo(`📊 Registration details: WorkspaceId=${workspaceId}, SessionId=${sessionId}`);
             // Notify state machine of successful router connection
             connectionStateMachine.handleRouterConnected();
             // Process any queued messages now that connection is established
@@ -937,7 +955,19 @@ async function enableInteractiveMcp(context: vscode.ExtensionContext) {
         // Step 1: Ensure router is running (this handles port conflicts)
         await ensureRouterRunning(context);
         
-        // Step 2: Connect to router and coordinate workspace
+        // Step 2: Start MCP server automatically with enhanced registration flow
+        logInfo('🔧 Starting MCP server automatically with enhanced registration...');
+        const mcpServerStarted = await startLocalMcpServer(context);
+        if (!mcpServerStarted) {
+            throw new Error('Failed to start MCP server automatically - check if another instance is running');
+        }
+        logInfo('✅ MCP server started successfully and ready for registration');
+        
+        // Step 2.5: Wait a moment for MCP server to fully initialize and register
+        logInfo('⏳ Waiting for MCP server to complete initialization...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Step 3: Connect to router and coordinate workspace
         await connectToMcpServer(context, 0);
         
         logInfo('✅ Interactive MCP tools enabled successfully');
@@ -1032,6 +1062,7 @@ function handleWorkspaceSyncComplete(message: any) {
     
     logInfo(`🎉 Workspace coordination complete! Final workspace: ${finalWorkspace}`);
     logInfo(`🔗 Now paired with MCP server session: ${mcpSessionId}`);
+    logInfo(`📊 Coordination details: VSCode=${vscodeSessionId}, MCP=${mcpSessionId}`);
     
     // Update our workspace ID if needed
     workspaceId = finalWorkspace;
@@ -1041,6 +1072,8 @@ function handleWorkspaceSyncComplete(message: any) {
     
     // Process any remaining queued messages now that we're fully ready
     processMessageQueue();
+    
+    logInfo('✅ Interactive MCP tools are now fully operational with workspace coordination complete');
 }
 
 
@@ -2139,59 +2172,78 @@ function getWorkspaceId(context: vscode.ExtensionContext): string {
     return path.resolve(context.extensionPath);
 }
 
-// Start shared router with atomic port checking and router startup
+// Start shared router with enhanced multi-instance detection and error handling
 async function startSharedRouter(context: vscode.ExtensionContext): Promise<boolean> {
-    logInfo('Starting shared router with atomic port management...');
+    logInfo('🚀 Starting shared router with enhanced multi-instance detection...');
     
     if (routerProcess) {
-        logInfo("Router process already running in this instance");
+        logInfo("✅ Router process already running in this instance");
         return true;
     }
 
     const config = vscode.workspace.getConfiguration("interactiveMcp");
     const port = config.get<number>("serverPort") || 8547;
     
-    logInfo(`Performing atomic port check and router startup on port ${port}...`);
+    logInfo(`🔍 Performing enhanced port check and router startup on port ${port}...`);
     
-    // Atomic operation: check port and start router without race condition window
+    // Enhanced atomic operation: check port and start router with better detection
     let processInfo = await getProcessUsingPort(port);
     
     if (processInfo) {
-        logInfo(`Port ${port} is occupied by PID ${processInfo.pid}`);
+        logInfo(`⚠️ Port ${port} is occupied by PID ${processInfo.pid}`);
         
-        // Test if it's our router
-        const isOurRouter = await testIfOurRouter(port);
+        // FIXED: Enhanced router detection with multiple attempts
+        logInfo(`🔍 Testing if existing process is our router (enhanced detection)...`);
+        let isOurRouter = false;
+        
+        // Try detection multiple times for reliability
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            logInfo(`🔍 Router detection attempt ${attempt}/3...`);
+            isOurRouter = await testIfOurRouter(port);
+            if (isOurRouter) {
+                logInfo(`✅ Router detected successfully on attempt ${attempt}`);
+                break;
+            }
+            if (attempt < 3) {
+                logInfo(`⏳ Waiting 500ms before next detection attempt...`);
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
         
         if (isOurRouter) {
-            logInfo(`Port ${port} has our router running - using existing instance`);
+            logInfo(`✅ Port ${port} has our Interactive MCP router running - using existing instance`);
+            logInfo(`🔗 Multi-instance support: Second IDE successfully connected to existing router`);
             return true;
         } else {
-            logInfo(`Port ${port} has foreign process - attempting to terminate PID ${processInfo.pid}`);
+            logInfo(`❌ Port ${port} has foreign process - attempting to terminate PID ${processInfo.pid}`);
             const killed = await killProcess(processInfo.pid);
             
             if (killed) {
-                logInfo(`Successfully terminated PID ${processInfo.pid}`);
-                // Wait a moment for port to be freed
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                logInfo(`✅ Successfully terminated foreign process PID ${processInfo.pid}`);
+                // Wait longer for port to be fully freed
+                logInfo(`⏳ Waiting for port to be fully freed...`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
                 
                 // Re-check port status after termination to ensure it's actually free
                 processInfo = await getProcessUsingPort(port);
                 if (processInfo) {
-                    logError(`Port ${port} still occupied after termination attempt`);
+                    logError(`❌ Port ${port} still occupied after termination attempt`);
                     vscode.window.showErrorMessage(`Port ${port} is still occupied and cannot be freed. Please close the application using this port.`);
                     return false;
                 }
+                logInfo(`✅ Port ${port} is now free after terminating foreign process`);
             } else {
-                logError(`Failed to terminate PID ${processInfo.pid}`);
-                vscode.window.showErrorMessage(`Port ${port} is occupied and cannot be freed. Please close the application using this port.`);
+                logError(`❌ Failed to terminate foreign process PID ${processInfo.pid}`);
+                vscode.window.showErrorMessage(`Port ${port} is occupied by another application and cannot be freed. Please close the application using this port or change the port in settings.`);
                 return false;
             }
         }
     } else {
-        logInfo(`Port ${port} is free`);
+        logInfo(`✅ Port ${port} is free and available for router startup`);
     }
     
     // Start new router immediately after confirming port is free
+    logInfo(`🚀 Starting new router instance on port ${port}...`);
     return await startNewRouter(context, port);
 }
 
@@ -2423,7 +2475,7 @@ async function killProcess(pid: number): Promise<boolean> {
     });
 }
 
-// Test if an existing WebSocket server is our router
+// Test if an existing WebSocket server is our router - FIXED for reliable detection
 async function testIfOurRouter(port: number): Promise<boolean> {
     logInfo(`🔍 Testing if port ${port} has our router...`);
     
@@ -2431,29 +2483,35 @@ async function testIfOurRouter(port: number): Promise<boolean> {
         try {
             const testSocket = new (require("ws"))(`ws://localhost:${port}`);
             let resolved = false;
+            let heartbeatReceived = false;
             
             const cleanup = () => {
                 if (!resolved) {
                     resolved = true;
                     testSocket.removeAllListeners();
-                    if (testSocket.readyState === WebSocket.OPEN) {
+                    if (testSocket.readyState === WebSocket.OPEN || testSocket.readyState === WebSocket.CONNECTING) {
                         testSocket.close();
                     }
                 }
             };
             
-            let heartbeatSent = false;
-            
             testSocket.on("open", () => {
                 logInfo(`📡 Connected to port ${port}, testing for our router...`);
-                // Wait a moment for potential initial heartbeat, then send our own
+                
+                // Our router sends initial heartbeat immediately on connection
+                // Wait for it first, then send our own if needed
                 setTimeout(() => {
-                    if (!resolved && !heartbeatSent) {
-                        logInfo(`📤 Sending heartbeat test to port ${port}...`);
-                        heartbeatSent = true;
-                        testSocket.send(JSON.stringify({ type: 'heartbeat' }));
+                    if (!resolved && !heartbeatReceived) {
+                        logInfo(`📤 No initial heartbeat received, sending test heartbeat to port ${port}...`);
+                        try {
+                            testSocket.send(JSON.stringify({ type: 'heartbeat' }));
+                        } catch (error) {
+                            logInfo(`❌ Failed to send test heartbeat: ${error}`);
+                            cleanup();
+                            resolve(false);
+                        }
                     }
-                }, 500);
+                }, 200); // Reduced wait time for faster detection
             });
             
             testSocket.on("message", (data: Buffer) => {
@@ -2463,7 +2521,13 @@ async function testIfOurRouter(port: number): Promise<boolean> {
                     
                     // If we receive any heartbeat (initial or response), it's our router
                     if (message.type === 'heartbeat') {
+                        heartbeatReceived = true;
                         logInfo(`✅ Port ${port} confirmed as our Interactive MCP router`);
+                        cleanup();
+                        resolve(true);
+                    } else {
+                        // Any other valid JSON message also indicates our router
+                        logInfo(`✅ Port ${port} confirmed as our router (received ${message.type})`);
                         cleanup();
                         resolve(true);
                     }
@@ -2480,22 +2544,24 @@ async function testIfOurRouter(port: number): Promise<boolean> {
                 resolve(false);
             });
             
-            testSocket.on("close", () => {
-                logInfo(`🔌 Connection to port ${port} closed during test`);
+            testSocket.on("close", (code: number, reason: Buffer) => {
+                const reasonStr = reason.toString();
+                logInfo(`🔌 Connection to port ${port} closed during test (code: ${code}, reason: ${reasonStr})`);
                 if (!resolved) {
                     cleanup();
+                    // If connection closed immediately, it might not be our router
                     resolve(false);
                 }
             });
             
-            // Increased timeout to 5 seconds for more reliability
+            // Reduced timeout to 3 seconds for faster detection
             setTimeout(() => {
                 if (!resolved) {
-                    logInfo(`⏰ Port ${port} test timed out after 5 seconds - not our router`);
+                    logInfo(`⏰ Port ${port} test timed out after 3 seconds - not our router`);
                     cleanup();
                     resolve(false);
                 }
-            }, 5000);
+            }, 3000);
         } catch (error) {
             logError(`❌ Error testing port ${port}`, error);
             resolve(false);

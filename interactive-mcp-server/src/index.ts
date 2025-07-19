@@ -12,6 +12,9 @@ let isRouterReady = false;
 let workspaceId = "";
 let sessionId = "";
 
+// Tool registration state
+let toolsRegistered = false;
+
 // Map to store pending requests
 const pendingRequests = new Map<string, {
   resolve: (value: any) => void;
@@ -61,6 +64,13 @@ function connectToRouter(): Promise<void> {
       }));
       
       isRouterReady = true;
+      
+      // FIXED: Register tools immediately after router connection
+      // This ensures tools show as "3 tools enabled" when router is connected
+      // Workspace coordination is still needed for actual tool functionality
+      console.error('[MCP] 🔧 Registering tools immediately after router connection');
+      registerTools();
+      
       resolve();
     });
     
@@ -209,9 +219,16 @@ function handleWorkspaceSyncComplete(message: any): void {
   
   console.error(`[MCP] 🎉 Workspace coordination complete! Final workspace: ${finalWorkspace}`);
   console.error(`[MCP] 🔗 Now paired with VS Code session: ${vscodeSessionId}`);
+  console.error(`[MCP] 📊 Coordination summary: MCP=${mcpSessionId}, VSCode=${vscodeSessionId}`);
   
   // Update our workspace ID if needed
   workspaceId = finalWorkspace;
+  
+  // Tools are already registered after router connection, but ensure they're registered
+  console.error(`[MCP] 🔧 Ensuring tools are registered after workspace coordination...`);
+  registerTools();
+  
+  console.error(`[MCP] ✅ MCP server fully operational - tools registered and workspace coordinated`);
 }
 
 // Helper function to send request to VS Code via shared router
@@ -243,137 +260,148 @@ async function requestUserInput(
   });
 }
 
-
-
-// Tool: Ask user with buttons
-server.tool(
-  "ask_user_buttons",
-  "Ask the user to choose from multiple predefined options using buttons. BEST FOR: Multiple choice questions, menu selections, preference choices. Each option should be distinct and clear. Users can also provide custom text if none of the buttons fit their needs.",
-  {
-    title: z.string().describe("Title of the popup"),
-    message: z.string().describe("Message to display to the user"),
-    options: z.array(z.object({
-      label: z.string().describe("Button label"),
-      value: z.string().describe("Value returned when button is clicked"),
-    })).describe("Array of button options"),
-  },
-  async ({ title, message, options }) => {
-    try {
-      const response = await requestUserInput("buttons", {
-        title,
-        message,
-        options,
-      });
-      return {
-        content: [
-          {
-            type: "text",
-            text: `User selected: ${response.value}`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-          },
-        ],
-      };
-    }
+// Tool registration - can be called multiple times safely
+function registerTools(): void {
+  if (toolsRegistered) {
+    console.error('[MCP] ✅ Tools already registered, skipping duplicate registration');
+    return;
   }
-);
-
-// Tool: Ask user for text input
-server.tool(
-  "ask_user_text",
-  "Ask the user for free-form text input. BEST FOR: Open-ended questions, detailed explanations, custom input where you need the user to type their own response. Always provide a clear, specific prompt.",
-  {
-    title: z.string().describe("Title of the input box"),
-    prompt: z.string().describe("Prompt message for the user"),
-    placeholder: z.string().optional().describe("Placeholder text for the input field"),
-    defaultValue: z.string().optional().describe("Default value for the input field"),
-  },
-  async ({ title, prompt, placeholder, defaultValue }) => {
-    try {
-      const response = await requestUserInput("text", {
-        title,
-        prompt,
-        placeholder,
-        defaultValue,
-      });
-      return {
-        content: [
-          {
-            type: "text",
-            text: `User entered: ${response.value || "(empty)"}`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// Tool: Ask user for confirmation
-server.tool(
-  "ask_user_confirm",
-  "Ask the user for a single binary decision with positive/negative outcome. ONLY USE FOR: Single actions that can be confirmed or declined (e.g., 'Save changes?', 'Delete file?', 'Proceed with action?'). DO NOT USE for choosing between two different options - use ask_user_buttons instead. Users can also provide custom text to explain their choice.",
-  {
-    title: z.string().describe("Title of the confirmation dialog"),
-    message: z.string().describe("Single question about one action that user can confirm or decline"),
-    confirmText: z.string().optional().describe("Text for the positive/confirm button (default: 'Yes')"),
-    cancelText: z.string().optional().describe("Text for the negative/cancel button (default: 'No')"),
-  },
-  async ({ title, message, confirmText, cancelText }) => {
-    try {
-      const response = await requestUserInput("confirm", {
-        title,
-        message,
-        confirmText: confirmText || "Yes",
-        cancelText: cancelText || "No",
-      });
-      // Handle both boolean confirmation and custom text responses
-      if (response.value) {
+  
+  console.error('[MCP] 🔧 Registering tools after router connection');
+  
+  // Tool: Ask user with buttons
+  server.tool(
+    "ask_user_buttons",
+    "Ask the user to choose from multiple predefined options using buttons. BEST FOR: Multiple choice questions, menu selections, preference choices. Each option should be distinct and clear. Users can also provide custom text if none of the buttons fit their needs.",
+    {
+      title: z.string().describe("Title of the popup"),
+      message: z.string().describe("Message to display to the user"),
+      options: z.array(z.object({
+        label: z.string().describe("Button label"),
+        value: z.string().describe("Value returned when button is clicked"),
+      })).describe("Array of button options"),
+    },
+    async ({ title, message, options }) => {
+      try {
+        const response = await requestUserInput("buttons", {
+          title,
+          message,
+          options,
+        });
         return {
           content: [
             {
               type: "text",
-              text: `User provided custom response: ${response.value}`,
+              text: `User selected: ${response.value}`,
             },
           ],
         };
-      } else {
+      } catch (error) {
         return {
           content: [
             {
               type: "text",
-              text: `User ${response.confirmed ? "confirmed" : "declined"}`,
+              text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
             },
           ],
         };
       }
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-          },
-        ],
-      };
     }
-  }
-);
+  );
+
+  // Tool: Ask user for text input
+  server.tool(
+    "ask_user_text",
+    "Ask the user for free-form text input. BEST FOR: Open-ended questions, detailed explanations, custom input where you need the user to type their own response. Always provide a clear, specific prompt.",
+    {
+      title: z.string().describe("Title of the input box"),
+      prompt: z.string().describe("Prompt message for the user"),
+      placeholder: z.string().optional().describe("Placeholder text for the input field"),
+      defaultValue: z.string().optional().describe("Default value for the input field"),
+    },
+    async ({ title, prompt, placeholder, defaultValue }) => {
+      try {
+        const response = await requestUserInput("text", {
+          title,
+          prompt,
+          placeholder,
+          defaultValue,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `User entered: ${response.value || "(empty)"}`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Tool: Ask user for confirmation
+  server.tool(
+    "ask_user_confirm",
+    "Ask the user for a single binary decision with positive/negative outcome. ONLY USE FOR: Single actions that can be confirmed or declined (e.g., 'Save changes?', 'Delete file?', 'Proceed with action?'). DO NOT USE for choosing between two different options - use ask_user_buttons instead. Users can also provide custom text to explain their choice.",
+    {
+      title: z.string().describe("Title of the confirmation dialog"),
+      message: z.string().describe("Single question about one action that user can confirm or decline"),
+      confirmText: z.string().optional().describe("Text for the positive/confirm button (default: 'Yes')"),
+      cancelText: z.string().optional().describe("Text for the negative/cancel button (default: 'No')"),
+    },
+    async ({ title, message, confirmText, cancelText }) => {
+      try {
+        const response = await requestUserInput("confirm", {
+          title,
+          message,
+          confirmText: confirmText || "Yes",
+          cancelText: cancelText || "No",
+        });
+        // Handle both boolean confirmation and custom text responses
+        if (response.value) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `User provided custom response: ${response.value}`,
+              },
+            ],
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `User ${response.confirmed ? "confirmed" : "declined"}`,
+              },
+            ],
+          };
+        }
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+  
+  toolsRegistered = true;
+  console.error('[MCP] ✅ All tools registered successfully');
+}
 
 
 // Start the server

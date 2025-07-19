@@ -2,6 +2,8 @@
 
 Transform your AI conversations with seamless interactive prompts directly in VS Code, Cursor, Windsurf, and other VS Code-based editors. Never lose your flow when AI assistants need user input!
 
+![Example Interactive Popup](assets/popup-example.png)
+
 ## ✨ What This Extension Does
 
 When working with AI assistants, sometimes they need to ask you questions or get your input. Instead of interrupting your conversation, this extension shows beautiful popups right in your editor where you can:

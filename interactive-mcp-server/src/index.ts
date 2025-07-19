@@ -139,7 +139,17 @@ function connectToRouter(): Promise<void> {
       console.error('[MCP] 🔌 Router connection closed');
       isRouterReady = false;
       routerClient = undefined;
-      // No automatic reconnection - VS Code extension manages router lifecycle
+      
+      // Attempt to reconnect after a brief delay
+      // This handles cases where the extension manually disconnects and restarts the router
+      setTimeout(() => {
+        if (!isRouterReady) {
+          console.error('[MCP] 🔄 Attempting to reconnect to router...');
+          connectToRouter().catch((error) => {
+            console.error('[MCP] ❌ Failed to reconnect to router:', error.message);
+          });
+        }
+      }, 1000);
     });
     
     routerClient.on('error', (error) => {

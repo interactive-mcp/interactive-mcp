@@ -2353,7 +2353,22 @@ async function startSharedRouter(context: vscode.ExtensionContext): Promise<bool
             logInfo(`🔗 Multi-instance support: Second IDE successfully connected to existing router`);
             return true;
         } else {
-            logInfo(`❌ Port ${port} has foreign process - attempting to terminate PID ${processInfo.pid}`);
+            // Before attempting to kill, try a more comprehensive detection
+            logInfo(`🔍 Performing extended router detection before termination...`);
+            
+            // Wait a bit and try detection again - sometimes routers need time to respond
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            const isOurRouterRetry = await testIfOurRouter(port);
+            
+            if (isOurRouterRetry) {
+                logInfo(`✅ Extended detection confirmed port ${port} has our router - using existing instance`);
+                return true;
+            }
+            
+            // Only attempt termination if we're really sure it's not our router
+            logInfo(`❌ Port ${port} confirmed as foreign process - attempting graceful termination of PID ${processInfo.pid}`);
+            
+            // Try graceful termination first, then force kill if needed
             const killed = await killProcess(processInfo.pid);
             
             if (killed) {
@@ -2366,13 +2381,16 @@ async function startSharedRouter(context: vscode.ExtensionContext): Promise<bool
                 processInfo = await getProcessUsingPort(port);
                 if (processInfo) {
                     logError(`❌ Port ${port} still occupied after termination attempt`);
-                    vscode.window.showErrorMessage(`Port ${port} is still occupied and cannot be freed. Please close the application using this port.`);
+                    vscode.window.showErrorMessage(`Port ${port} is still occupied and cannot be freed. Please close the application using this port or restart VS Code.`);
                     return false;
                 }
                 logInfo(`✅ Port ${port} is now free after terminating foreign process`);
             } else {
                 logError(`❌ Failed to terminate foreign process PID ${processInfo.pid}`);
-                vscode.window.showErrorMessage(`Port ${port} is occupied by another application and cannot be freed. Please close the application using this port or change the port in settings.`);
+                
+                // More helpful error message with recovery suggestions
+                const message = `Port ${port} is occupied by another application and cannot be freed. Try:\n1. Restart VS Code\n2. Change the port in settings\n3. Manually close the application using port ${port}`;
+                vscode.window.showErrorMessage(message);
                 return false;
             }
         }
@@ -2441,8 +2459,9 @@ async function startNewRouter(context: vscode.ExtensionContext, port: number): P
             logError("Router STDERR: " + output);
             
             // Check for specific error patterns
-            if (output.includes("EADDRINUSE")) {
-                logError("❌ Port conflict detected in router stderr");
+            if (output.includes("EADDRINUSE") || output.includes("Port is already in use")) {
+                logError("❌ Port conflict detected in router stderr - another router instance is running");
+                // Don't immediately kill the process, let the health check handle it
             }
         });
 
@@ -2451,11 +2470,16 @@ async function startNewRouter(context: vscode.ExtensionContext, port: number): P
             
             // Enhanced cleanup on router process termination
             if (code !== 0 && code !== null) {
-                logError(`❌ Router process exited unexpectedly with code ${code}`);
-                // Additional cleanup for unexpected termination
-                if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-                    logInfo('🔌 Closing WebSocket connection due to router failure');
-                    wsClient.close();
+                if (code === 1) {
+                    logInfo(`🔄 Router exited with code 1 - likely port conflict with existing router instance`);
+                    // Don't treat this as an error - there might be a valid router running
+                } else {
+                    logError(`❌ Router process exited unexpectedly with code ${code}`);
+                    // Additional cleanup for unexpected termination
+                    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+                        logInfo('🔌 Closing WebSocket connection due to router failure');
+                        wsClient.close();
+                    }
                 }
             }
             
@@ -2525,7 +2549,7 @@ async function getProcessUsingPort(port: number): Promise<{ pid: number; command
         logDebug(`🔍 Checking port ${port} with command: ${command}`);
         
         const { spawn } = require('child_process');
-        const proc = spawn('sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'] });
+        const proc = spawn(command, { shell: true, stdio: ['pipe', 'pipe', 'pipe'] });
         
         let output = '';
         let errorOutput = '';
@@ -2603,7 +2627,7 @@ async function killProcess(pid: number): Promise<boolean> {
         const command = isWindows ? `taskkill /F /PID ${pid}` : `kill -9 ${pid}`;
         
         const { spawn } = require('child_process');
-        const proc = spawn('sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'] });
+        const proc = spawn(command, { shell: true, stdio: ['pipe', 'pipe', 'pipe'] });
         
         proc.on('close', (code: number | null) => {
             resolve(code === 0);
@@ -2649,7 +2673,7 @@ async function testIfOurRouter(port: number): Promise<boolean> {
                             resolve(false);
                         }
                     }
-                }, 200); // Reduced wait time for faster detection
+                }, 500); // Increased wait time for more reliable detection
             });
             
             testSocket.on("message", (data: Buffer) => {
@@ -2692,14 +2716,14 @@ async function testIfOurRouter(port: number): Promise<boolean> {
                 }
             });
             
-            // Reduced timeout to 3 seconds for faster detection
+            // Increased timeout to 5 seconds for more reliable detection
             setTimeout(() => {
                 if (!resolved) {
-                    logInfo(`⏰ Port ${port} test timed out after 3 seconds - not our router`);
+                    logInfo(`⏰ Port ${port} test timed out after 5 seconds - not our router`);
                     cleanup();
                     resolve(false);
                 }
-            }, 3000);
+            }, 5000);
         } catch (error) {
             logError(`❌ Error testing port ${port}`, error);
             resolve(false);

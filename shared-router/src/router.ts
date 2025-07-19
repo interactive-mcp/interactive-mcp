@@ -23,7 +23,7 @@ interface WorkspaceMapping {
 }
 
 interface RouterMessage {
-  type: 'register' | 'request' | 'response' | 'heartbeat' | 'workspace-sync-request' | 'workspace-sync-response' | 'workspace-sync-complete';
+  type: 'register' | 'request' | 'response' | 'heartbeat' | 'workspace-sync-request' | 'workspace-sync-response' | 'workspace-sync-complete' | 'manual-disconnection' | 'pairing-ready';
   clientType?: 'mcp-server' | 'vscode-extension';
   workspaceId?: string;
   sessionId?: string;
@@ -125,8 +125,32 @@ export class SharedRouter {
       case 'heartbeat':
         this.sendMessage(ws, { type: 'heartbeat' });
         break;
+      case 'manual-disconnection':
+        this.handleManualDisconnection(ws, message);
+        break;
+      case 'pairing-ready':
+        this.handlePairingReady(ws, message);
+        break;
       default:
         console.warn('[SharedRouter] Unknown message type:', message.type);
+    }
+  }
+
+  private handleManualDisconnection(ws: WebSocket, message: RouterMessage): void {
+    const clientInfo = this.clients.get(ws);
+    if (clientInfo) {
+      console.log(`[SharedRouter] Manual disconnection signal received from ${clientInfo.clientType} for workspace: ${clientInfo.workspaceId}`);
+      // The actual disconnection handling will be done by the ws.on('close') event
+      // This is just for logging/acknowledgment
+    }
+  }
+
+  private handlePairingReady(ws: WebSocket, message: RouterMessage): void {
+    const clientInfo = this.clients.get(ws);
+    if (clientInfo && clientInfo.clientType === 'vscode-extension') {
+      console.log(`[SharedRouter] VS Code extension signals ready for pairing: ${clientInfo.sessionId} (workspace: ${clientInfo.workspaceId})`);
+      // Force immediate coordination attempt when VS Code signals pairing readiness
+      this.initiateWorkspaceCoordination(clientInfo);
     }
   }
 
@@ -290,9 +314,18 @@ export class SharedRouter {
     // Update workspace mapping
     const workspace = this.workspaces.get(clientInfo.workspaceId);
     if (workspace) {
+      const rePartnering = (partnerClient: ClientInfo, unmatchedList: Map<string, ClientInfo>) => {
+        if (partnerClient) {
+          unmatchedList.set(partnerClient.sessionId, partnerClient);
+          console.log(`[SharedRouter] Moved ${partnerClient.clientType} ${partnerClient.sessionId} back to unmatched list for re-pairing.`);
+        }
+      };
+
       if (clientInfo.clientType === 'mcp-server') {
+        rePartnering(workspace.vscodeClient!, this.unmatchedVscodeClients);
         delete workspace.mcpClient;
       } else if (clientInfo.clientType === 'vscode-extension') {
+        rePartnering(workspace.mcpClient!, this.unmatchedMcpServers);
         delete workspace.vscodeClient;
       }
 

@@ -95,8 +95,12 @@ Once set up, the extension works automatically:
 - **Manual Control**: Click the status bar indicator or use the Command Palette (Ctrl+Shift+P) to find "Interactive MCP" commands
 
 ### Status Indicators
-- 🔌 **MCP Disconnected** - Click to connect
-- ✅ **MCP Connected** - Ready to receive prompts from AI assistants
+   - "🚫 **Interactive MCP Tools Off"** - Click it to connect
+   - "✔️✔️ **Interactive MCP Tools Ready"** - You're ready to go!
+
+#### Screenshots
+
+![Interactive MCP status bar showing the ready state with connection indicator and chime button](assets/extension-buttons.png)
 
 ## ⚙️ Settings
 

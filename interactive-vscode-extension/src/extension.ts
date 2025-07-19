@@ -1353,8 +1353,18 @@ function createButtonDialogHTML(options: any, isDark: boolean): string {
                 max-width: 450px;
                 width: 100%;
                 box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-                text-align: center;
+                text-align: left;
                 animation: slideIn 0.2s ease-out, glow 3s ease-in-out infinite;
+            }
+            
+            /* Add specific list styling */
+            ul, ol {
+                padding-left: 20px;
+                margin: 10px 0;
+            }
+
+            li {
+                margin-bottom: 5px;
             }
             
             /* Subtle attention-grabbing glow effect */
@@ -1387,6 +1397,25 @@ function createButtonDialogHTML(options: any, isDark: boolean): string {
                 line-height: 1.4;
                 color: ${textColor};
                 opacity: 0.9;
+            }
+            
+            /* Code block styling */
+            pre {
+                background: transparent;
+                padding: 10px;
+                border-radius: 4px;
+                overflow-x: auto;
+                white-space: pre;
+                word-wrap: normal;
+                border: 1px solid ${borderColor};
+            }
+
+            code {
+                font-family: monospace;
+                font-size: 13px;
+                background: transparent;  /* Transparent for inline code */
+                padding: 2px 4px;  /* Slight padding for visibility */
+                border-radius: 3px;
             }
             
             .buttons-container {
@@ -1512,7 +1541,7 @@ function createButtonDialogHTML(options: any, isDark: boolean): string {
         <div class="modal-backdrop">
             <div class="dialog-container">
                 <div class="dialog-title">${options.title}</div>
-                <div class="dialog-message">${options.message}</div>
+                <div class="dialog-message">${renderMarkdown(options.message)}</div>
                 
                 <div class="buttons-container">
                     ${buttonElements}
@@ -1629,7 +1658,17 @@ function createConfirmHTML(options: any, isDark: boolean): string {
                     max-width: 600px;
                     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
                     animation: slideIn 0.2s ease-out, glow 3s ease-in-out infinite;
-                    text-align: center;
+                    text-align: left;  /* Changed to left */
+                }
+                
+                /* Add list styling */
+                ul, ol {
+                    padding-left: 20px;
+                    margin: 10px 0;
+                }
+
+                li {
+                    margin-bottom: 5px;
                 }
                 
                 /* Subtle attention-grabbing glow effect */
@@ -1669,6 +1708,26 @@ function createConfirmHTML(options: any, isDark: boolean): string {
                     margin-bottom: 24px;
                     line-height: 1.5;
                 }
+
+                /* Code block styling */
+                pre {
+                    background: transparent;
+                    padding: 10px;
+                    border-radius: 4px;
+                    overflow-x: auto;
+                    white-space: pre;
+                    word-wrap: normal;
+                    border: 1px solid ${borderColor};
+                }
+
+                code {
+                    font-family: monospace;
+                    font-size: 13px;
+                    background: transparent;
+                    padding: 2px 4px;
+                    border-radius: 3px;
+                }
+                
                 .buttons {
                     display: flex;
                     gap: 12px;
@@ -1769,7 +1828,7 @@ function createConfirmHTML(options: any, isDark: boolean): string {
         <body>
             <div class="modal">
                 <div class="title">${options.title || 'Confirm'}</div>
-                <div class="message">${options.message}</div>
+                <div class="message">${renderMarkdown(options.message)}</div>
                 
                 <div class="buttons">
                     <button class="cancel-btn" onclick="sendCancel()">${options.cancelText || 'No'}</button>
@@ -1897,6 +1956,17 @@ function createTextInputHTML(options: any, isDark: boolean): string {
                     max-width: 600px;
                     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
                     animation: slideIn 0.2s ease-out, glow 3s ease-in-out infinite;
+                    text-align: left;  /* Changed to left */
+                }
+                
+                /* Add list styling */
+                ul, ol {
+                    padding-left: 20px;
+                    margin: 10px 0;
+                }
+
+                li {
+                    margin-bottom: 5px;
                 }
                 
                 /* Subtle attention-grabbing glow effect */
@@ -1934,6 +2004,26 @@ function createTextInputHTML(options: any, isDark: boolean): string {
                     line-height: 1.5;
                     text-align: center;
                 }
+
+                /* Code block styling */
+                pre {
+                    background: transparent;
+                    padding: 10px;
+                    border-radius: 4px;
+                    overflow-x: auto;
+                    white-space: pre;
+                    word-wrap: normal;
+                    border: 1px solid ${borderColor};
+                }
+
+                code {
+                    font-family: monospace;
+                    font-size: 13px;
+                    background: transparent;
+                    padding: 2px 4px;
+                    border-radius: 3px;
+                }
+                
                 .input-container {
                     margin-bottom: 20px;
                 }
@@ -1988,7 +2078,7 @@ function createTextInputHTML(options: any, isDark: boolean): string {
         <body>
             <div class="modal">
                 <div class="title">${options.title || 'Enter Text'}</div>
-                <div class="prompt">${options.prompt}</div>
+                <div class="prompt">${renderMarkdown(options.prompt)}</div>
                 <div class="input-container">
                     <input type="text" id="textInput" placeholder="${options.placeholder || ''}" value="${options.defaultValue || ''}" autofocus>
                 </div>
@@ -2119,7 +2209,55 @@ async function handleConfirmRequest(options: any): Promise<any> {
     });
 }
 
+function renderMarkdown(md: string): string {
+  // Helper to escape HTML
+  function escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+  }
 
+  // First, extract multiline code blocks to protect them
+  const codeBlockRegex = /```([\s\S]*?)```/g;
+  let codeBlocks: string[] = [];
+  let placeholderIndex = 0;
+  md = md.replace(codeBlockRegex, (match, p1) => {
+    codeBlocks.push(`<pre><code>${escapeHtml(p1.trim())}</code></pre>`);
+    return `{{CODEBLOCK_${placeholderIndex++}}}`;
+  });
+
+  // Now process lines for other Markdown
+  const lines = md.split('\n');
+  let html = '';
+  let inList = false;
+  let listType = '';
+  lines.forEach(line => {
+    let processed = escapeHtml(line);  // Escape first
+    // Headers
+    const headerMatch = processed.match(/^#{1,6}\s+/);
+    if (headerMatch) {
+      const level = headerMatch[0].match(/^#+/)![0].length;
+      const content = processed.replace(/^#{1,6}\s+/, '');
+      html += `<h${level}>${content}</h${level}>`;
+      return;
+    }
+    // Lists...
+    // (keep existing list logic)
+    // Inline elements on non-list lines
+    if (!inList) {
+      processed = processed.replace(/\*\*([^\*]+)\*\*/g, '<strong>$1</strong>');
+      processed = processed.replace(/\*([^\*]+)\*/g, '<em>$1</em>');
+      processed = processed.replace(/`([^`]+)`/g, (match, p1) => `<code>${escapeHtml(p1)}</code>`);  // Escape inside inline code
+      processed = processed.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>');
+      processed = processed.replace(/!\[(.*?)\]\((.*?)\)/g, '<img alt="$1" src="$2" />');
+    }
+    html += processed + '<br>';
+  });
+  if (inList) html += `</${listType}>`;
+
+  // Restore code blocks
+  html = html.replace(/{{CODEBLOCK_(\d+)}}/g, (match, index) => codeBlocks[parseInt(index)]);
+
+  return html;
+}
 
 // Enhanced router cleanup function
 function cleanupRouterProcess(): void {

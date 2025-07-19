@@ -407,10 +407,10 @@ function registerTools(): void {
   // Tool: Ask user with buttons
   server.tool(
     "ask_user_buttons",
-    "Ask the user to choose from multiple predefined options using buttons. BEST FOR: Multiple choice questions, menu selections, preference choices. Each option should be distinct and clear. Users can also provide custom text if none of the buttons fit their needs.",
+    "Ask the user to choose from multiple predefined options using buttons. BEST FOR: Multiple choice questions, menu selections, preference choices. Each option should be distinct and clear. Users can also provide custom text if none of the buttons fit their needs. The message supports Markdown formatting (headers, **bold**, *italic*, lists, `code`, code blocks, links).",
     {
       title: z.string().describe("Title of the popup"),
-      message: z.string().describe("Message to display to the user"),
+      message: z.string().describe("Message to display to the user (supports Markdown formatting)"),
       options: z.array(z.object({
         label: z.string().describe("Button label"),
         value: z.string().describe("Value returned when button is clicked"),
@@ -447,10 +447,10 @@ function registerTools(): void {
   // Tool: Ask user for text input
   server.tool(
     "ask_user_text",
-    "Ask the user for free-form text input. BEST FOR: Open-ended questions, detailed explanations, custom input where you need the user to type their own response. Always provide a clear, specific prompt.",
+    "Ask the user for free-form text input. BEST FOR: Open-ended questions, detailed explanations, custom input where you need the user to type their own response. Always provide a clear, specific prompt. The prompt supports Markdown formatting (headers, **bold**, *italic*, lists, `code`, code blocks, links).",
     {
       title: z.string().describe("Title of the input box"),
-      prompt: z.string().describe("Prompt message for the user"),
+      prompt: z.string().describe("Prompt message for the user (supports Markdown formatting)"),
       placeholder: z.string().optional().describe("Placeholder text for the input field"),
       defaultValue: z.string().optional().describe("Default value for the input field"),
     },
@@ -486,10 +486,10 @@ function registerTools(): void {
   // Tool: Ask user for confirmation
   server.tool(
     "ask_user_confirm",
-    "Ask the user for a single binary decision with positive/negative outcome. ONLY USE FOR: Single actions that can be confirmed or declined (e.g., 'Save changes?', 'Delete file?', 'Proceed with action?'). DO NOT USE for choosing between two different options - use ask_user_buttons instead. Users can also provide custom text to explain their choice.",
+    "Ask the user for a single binary decision with positive/negative outcome. ONLY USE FOR: Single actions that can be confirmed or declined (e.g., 'Save changes?', 'Delete file?', 'Proceed with action?'). DO NOT USE for choosing between two different options - use ask_user_buttons instead. Users can also provide custom text to explain their choice. The message supports Markdown formatting (headers, **bold**, *italic*, lists, `code`, code blocks, links).",
     {
       title: z.string().describe("Title of the confirmation dialog"),
-      message: z.string().describe("Single question about one action that user can confirm or decline"),
+      message: z.string().describe("Single question about one action that user can confirm or decline (supports Markdown formatting)"),
       confirmText: z.string().optional().describe("Text for the positive/confirm button (default: 'Yes')"),
       cancelText: z.string().optional().describe("Text for the negative/cancel button (default: 'No')"),
     },

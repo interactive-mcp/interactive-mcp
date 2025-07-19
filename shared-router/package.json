@@ -1,0 +1,29 @@
+{
+  "name": "interactive-mcp-shared-router",
+  "version": "1.0.0",
+  "description": "Shared WebSocket router for multi-instance Interactive MCP support",
+  "main": "dist/router.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/router.ts",
+    "start": "node dist/router.js"
+  },
+  "keywords": [
+    "mcp",
+    "vscode",
+    "websocket",
+    "router"
+  ],
+  "author": "Interactive MCP Team",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

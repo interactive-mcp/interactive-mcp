@@ -68,8 +68,8 @@ fi
 print_step "Installing VS Code extension dependencies..."
 npm install
 
-print_step "Bundling MCP server into extension..."
-npm run bundle-server
+print_step "Bundling MCP server and shared router into extension..."
+npm run bundle-all
 
 print_step "Compiling VS Code extension TypeScript..."
 npm run compile

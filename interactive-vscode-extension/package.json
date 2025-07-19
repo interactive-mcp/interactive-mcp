@@ -41,13 +41,13 @@
   "contributes": {
     "commands": [
       {
-        "command": "interactiveMcp.connect",
-        "title": "Connect to MCP Server",
+        "command": "interactiveMcp.enable",
+        "title": "Enable Tools",
         "category": "Interactive MCP"
       },
       {
-        "command": "interactiveMcp.disconnect", 
-        "title": "Disconnect from MCP Server",
+        "command": "interactiveMcp.disable", 
+        "title": "Disable Tools",
         "category": "Interactive MCP"
       },
       {
@@ -110,7 +110,7 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile && npm run bundle-server",
+    "vscode:prepublish": "npm run compile && npm run bundle-all",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
@@ -121,6 +121,10 @@
     "bundle-server": "npm run build-server && npm run copy-server",
     "build-server": "cd ../interactive-mcp-server && npm install && npm run build",
     "copy-server": "node scripts/copy-server.js",
+    "bundle-router": "npm run build-router && npm run copy-router",
+    "build-router": "cd ../shared-router && npm install && npm run build",
+    "copy-router": "node scripts/copy-router.js",
+    "bundle-all": "npm run bundle-server && npm run bundle-router",
     "start-local-server": "node bundled-server/dist/index.js"
   },
   "devDependencies": {

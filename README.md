@@ -112,9 +112,13 @@ The configuration depends on which AI assistant you're using. Here's the general
 #### 🔌 **Step 4: Connect the Extension**
 
 1. **Check the status bar** at the bottom of your editor
-2. **Look for "MCP" indicator:**
-   - 🔌 **"MCP Disconnected"** - Click it to connect
-   - ✅ **"MCP Connected"** - You're ready to go!
+2. **Look for the "Interactive MCP" indicator:**
+   - "🚫 **Interactive MCP Tools Off"** - Click it to connect
+   - "✔️✔️ **Interactive MCP Tools Ready"** - You're ready to go!
+
+#### Screenshots
+
+![Interactive MCP status bar showing the ready state with connection indicator and chime button](interactive-vscode-extension/assets/extension-buttons.png)
 
 **If auto-connection doesn't work:**
 - Press `Ctrl+Shift+P` / `Cmd+Shift+P`

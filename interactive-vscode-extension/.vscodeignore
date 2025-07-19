@@ -59,3 +59,4 @@ bundled-server/node_modules/**/webpack.config*
 bundled-server/node_modules/**/*.config.js
 bundled-server/node_modules/**/.* 
 !sounds/** 
+!assets/**

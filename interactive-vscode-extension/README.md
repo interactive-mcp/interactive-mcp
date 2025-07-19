@@ -25,6 +25,7 @@ All responses go directly back to your AI conversation seamlessly.
 ## What's New in Version 0.3.0
 
 - Connection in multiple IDEs is now possible, enabling multi-instance and multi-workspace support.
+- Popups support Markdown text
 
 ## 🎬 How It Works
 

@@ -2,9 +2,7 @@
 
 Transform your AI conversations with seamless interactive prompts directly in VS Code, Cursor, Windsurf, and other VS Code-based editors. Never lose your flow when AI assistants need user input!
 
-![Example Interactive Popup](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example-1.png)
-
-![Example Interactive Popup](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example-2.png)
+![Example Interactive Popup](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example-1.jpg)
 
 ## ✨ What This Extension Does
 
@@ -56,7 +54,7 @@ All responses go directly back to your AI conversation seamlessly.
 
 ### Step 2: Get Your Configuration
 
-After installation, click "Copy MCP JSON Configuration" from the welcome notification or use the command palette (Ctrl+Shift+P) to find "Interactive MCP: Copy MCP JSON Configuration".
+After installation, click "Copy MCP JSON Configuration" from the welcome notification or use the command palette (Ctrl+Shift+P) to find "Interactive MCP: Copy MCP JSON Configuration". This will copy the HTTP transport configuration to your clipboard.
 
 ### Step 3: Configure Your AI Assistant
 
@@ -68,7 +66,9 @@ After installation, click "Copy MCP JSON Configuration" from the welcome notific
    ```json
    {
      "mcpServers": {
-       // Paste your copied configuration here
+       "interactive-mcp": {
+         "url": "http://localhost:8090/mcp"
+       }
      }
    }
    ```
@@ -80,14 +80,15 @@ After installation, click "Copy MCP JSON Configuration" from the welcome notific
        "existing-server": {
          // your existing server config
        },
-       // Paste your copied configuration here (adds "interactive-mcp" entry)
+       "interactive-mcp": {
+         "url": "http://localhost:8090/mcp"
+       }
      }
    }
    ```
 
 3. Restart your AI assistant
 
-**Note on Updates:** If you update the extension, you may need to update the path in your MCP JSON config file. Use the command palette ("Interactive MCP: Copy MCP JSON Configuration") to get the latest configuration and update your file accordingly.
 
 ### Step 4: Start Using
 

@@ -2,9 +2,7 @@
 
 Transform your AI conversations with seamless interactive prompts directly in VS Code. Never lose your flow when AI assistants need user input!
 
-![Example Interactive Popup 1](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example-1.png)
-
-![Example Interactive Popup 2](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example-2.png)
+![Example Interactive Popup 1](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example-1.jpg)
 
 ## 🚀 What This Project Does
 
@@ -92,7 +90,9 @@ The configuration depends on which AI assistant you're using. Here's the general
    ```json
    {
      "mcpServers": {
-       // Paste your copied configuration here
+       "interactive-mcp": {
+         "url": "http://localhost:8090/mcp"
+       }
      }
    }
    ```
@@ -104,7 +104,9 @@ The configuration depends on which AI assistant you're using. Here's the general
        "existing-server": {
          // your existing server config
        },
-       // Paste your copied configuration here (it will add the "interactive-mcp" entry)
+       "interactive-mcp": {
+         "url": "http://localhost:8090/mcp"
+       }
      }
    }
    ```
@@ -113,7 +115,7 @@ The configuration depends on which AI assistant you're using. Here's the general
 
 4. **Restart your IDE** completely
 
-**🌐 HTTP Transport Option (Recommended):** For a simpler, update-resistant configuration, you can use HTTP transport instead:
+**🌐 MCP Configuration:** The extension uses HTTP transport for a simple, update-resistant configuration:
 ```json
 {
   "mcpServers": {
@@ -125,7 +127,6 @@ The configuration depends on which AI assistant you're using. Here's the general
 ```
 This configuration won't break when you update the extension! See [HTTP-TRANSPORT-README.md](HTTP-TRANSPORT-README.md) for details.
 
-**Note on Updates:** If you use the traditional file-path configuration and update the extension, you may need to update the path in your MCP JSON config file. Use the command palette ("Interactive MCP: Copy MCP JSON Configuration") to get the latest configuration and update your file accordingly.
 
 #### 🔌 **Step 4: Connect the Extension**
 

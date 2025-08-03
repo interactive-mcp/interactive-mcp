@@ -4,6 +4,8 @@ import { z } from "zod";
 import WebSocket from "ws";
 import { createHash } from "crypto";
 import * as path from "path";
+import express from "express";
+import cors from "cors";
 import { normalizeWorkspacePath, areWorkspacePathsRelated } from "./path-utils.js";
 
 // Shared router connection
@@ -566,27 +568,409 @@ function registerTools(): void {
 }
 
 
+// HTTP Transport Implementation
+class HttpServerTransport {
+  private app: express.Application;
+  private server: any;
+  private sessionStates = new Map<string, any>();
+  private mcpServer: McpServer;
+
+  constructor(mcpServer: McpServer) {
+    this.mcpServer = mcpServer;
+    this.app = express();
+    this.setupMiddleware();
+    this.setupRoutes();
+  }
+
+  private setupMiddleware() {
+    // Enable CORS for localhost connections
+    this.app.use(cors({
+      origin: ['http://localhost:*', 'http://127.0.0.1:*'],
+      credentials: true
+    }));
+    
+    this.app.use(express.json());
+    
+    // Validate Origin header to prevent DNS rebinding attacks
+    this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const origin = req.get('Origin');
+      if (origin && !origin.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/)) {
+        return res.status(403).json({ error: 'Invalid origin' });
+      }
+      next();
+    });
+  }
+
+  private setupRoutes() {
+    // Main MCP endpoint - handles both POST and GET
+    this.app.post('/mcp', this.handlePost.bind(this));
+    this.app.get('/mcp', this.handleGet.bind(this));
+    this.app.delete('/mcp', this.handleDelete.bind(this));
+  }
+
+  private async handlePost(req: express.Request, res: express.Response) {
+    try {
+      const sessionId = req.get('Mcp-Session-Id');
+      const message = req.body;
+
+      // Handle session management
+      if (message.method === 'initialize') {
+        const newSessionId = this.generateSessionId();
+        this.sessionStates.set(newSessionId, {});
+        res.setHeader('Mcp-Session-Id', newSessionId);
+        console.error(`[MCP] 🆔 Created new session: ${newSessionId}`);
+      } else if (sessionId && !this.sessionStates.has(sessionId)) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      // Check if client wants streaming response
+      const acceptHeader = req.get('Accept') || '';
+      const wantsSSE = acceptHeader.includes('text/event-stream');
+
+      if (wantsSSE && message.method) {
+        // Return SSE stream for requests
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        // Process the request and stream the response
+        const response = await this.processMessage(message);
+        
+        // Send the response as SSE event
+        res.write(`data: ${JSON.stringify(response)}\n\n`);
+        res.end();
+      } else {
+        // Handle regular JSON response
+        if (message.method) {
+          // This is a request - process it
+          const response = await this.processMessage(message);
+          res.json(response);
+        } else {
+          // This is a notification or response - acknowledge it
+          res.status(202).send();
+        }
+      }
+    } catch (error) {
+      console.error('[MCP] ❌ Error handling POST request:', error);
+      res.status(500).json({ 
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  private async handleGet(req: express.Request, res: express.Response) {
+    const acceptHeader = req.get('Accept') || '';
+    
+    if (acceptHeader.includes('text/event-stream')) {
+      // Setup SSE stream for server-initiated messages
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      
+      // Keep connection alive with periodic heartbeats
+      const heartbeat = setInterval(() => {
+        res.write(': heartbeat\n\n');
+      }, 30000);
+
+      req.on('close', () => {
+        clearInterval(heartbeat);
+      });
+
+      // Keep connection open
+      // In a real implementation, you'd send server-initiated messages here
+    } else {
+      res.status(405).json({ error: 'Method not allowed without SSE accept header' });
+    }
+  }
+
+  private handleDelete(req: express.Request, res: express.Response) {
+    const sessionId = req.get('Mcp-Session-Id');
+    
+    if (sessionId && this.sessionStates.has(sessionId)) {
+      this.sessionStates.delete(sessionId);
+      console.error(`[MCP] 🗑️ Deleted session: ${sessionId}`);
+      res.status(200).send();
+    } else {
+      res.status(404).json({ error: 'Session not found' });
+    }
+  }
+
+  private async processMessage(message: any): Promise<any> {
+    // This is a simplified implementation that manually handles the core MCP methods
+    // In a production system, you'd want to properly integrate with the MCP SDK's transport layer
+    
+    try {
+      if (message.method === 'initialize') {
+        // Register tools when initializing
+        if (!toolsRegistered) {
+          registerTools();
+        }
+        
+        return {
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            protocolVersion: "2024-11-05",
+            capabilities: {
+              tools: {},
+              resources: {},
+              prompts: {},
+              logging: {}
+            },
+            serverInfo: {
+              name: "interactive-mcp",
+              version: "1.0.0"
+            }
+          }
+        };
+      }
+
+      if (message.method === 'tools/list') {
+        return {
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            tools: [
+              {
+                name: "ask_user_buttons",
+                title: "Ask User for Button Selection",
+                description: "Ask the user to choose from multiple predefined options using buttons. BEST FOR: Multiple choice questions, menu selections, preference choices. Each option should be distinct and clear. Users can also provide custom text if none of the buttons fit their needs. The message supports Markdown formatting (headers, **bold**, *italic*, lists, `code`, code blocks, links).",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    title: { type: "string", description: "Title of the popup" },
+                    message: { type: "string", description: "Message to display to the user (supports Markdown formatting)" },
+                    options: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          label: { type: "string", description: "Button label" },
+                          value: { type: "string", description: "Value returned when button is clicked" }
+                        },
+                        required: ["label", "value"]
+                      }
+                    }
+                  },
+                  required: ["title", "message", "options"]
+                }
+              },
+              {
+                name: "ask_user_text",
+                title: "Ask User for Text Input",
+                description: "Ask the user to provide text input through a text field. BEST FOR: Open-ended questions, file paths, names, descriptions. The prompt supports Markdown formatting (headers, **bold**, *italic*, lists, `code`, code blocks, links).",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    title: { type: "string", description: "Title of the popup" },
+                    prompt: { type: "string", description: "Prompt message to display to the user (supports Markdown formatting)" },
+                    placeholder: { type: "string", description: "Placeholder text for the input field" }
+                  },
+                  required: ["title", "prompt"]
+                }
+              },
+              {
+                name: "ask_user_confirm",
+                title: "Ask User for Confirmation",
+                description: "Ask the user for confirmation with Yes/No buttons. BEST FOR: Confirmation dialogs, yes/no questions, permission requests. The message supports Markdown formatting (headers, **bold**, *italic*, lists, `code`, code blocks, links).",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    title: { type: "string", description: "Title of the popup" },
+                    message: { type: "string", description: "Message to display to the user (supports Markdown formatting)" }
+                  },
+                  required: ["title", "message"]
+                }
+              }
+            ],
+            nextCursor: null
+          }
+        };
+      }
+
+      if (message.method === 'tools/call') {
+        const toolName = message.params?.name;
+        const args = message.params?.arguments;
+
+        if (!isRouterReady) {
+          return {
+            jsonrpc: "2.0",
+            id: message.id,
+            error: {
+              code: -32603,
+              message: "VS Code extension not connected",
+              data: "The VS Code extension must be running and connected for interactive tools to work"
+            }
+          };
+        }
+
+        // Send request to VS Code extension via router
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+        
+        return new Promise((resolve, reject) => {
+          // Store the request for response handling
+          pendingRequests.set(requestId, {
+            resolve,
+            reject,
+            timeout: setTimeout(() => {
+              pendingRequests.delete(requestId);
+              reject(new Error('Request timeout'));
+            }, 30000)
+          });
+
+          // Send request to VS Code extension
+          const requestMessage = {
+            type: 'request',
+            requestId,
+            inputType: toolName.replace('ask_user_', ''),
+            options: args
+          };
+
+          if (routerClient && routerClient.readyState === WebSocket.OPEN) {
+            routerClient.send(JSON.stringify(requestMessage));
+          } else {
+            pendingRequests.delete(requestId);
+            reject(new Error('Router connection not available'));
+          }
+        }).then((result) => {
+          return {
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(result)
+                }
+              ]
+            }
+          };
+        }).catch((error) => {
+          return {
+            jsonrpc: "2.0",
+            id: message.id,
+            error: {
+              code: -32603,
+              message: "Tool execution failed",
+              data: error.message
+            }
+          };
+        });
+      }
+
+      // Handle other methods
+      return {
+        jsonrpc: "2.0",
+        id: message.id,
+        error: {
+          code: -32601,
+          message: "Method not found",
+          data: `Unknown method: ${message.method}`
+        }
+      };
+    } catch (error) {
+      return {
+        jsonrpc: "2.0",
+        id: message.id,
+        error: {
+          code: -32603,
+          message: "Internal error",
+          data: error instanceof Error ? error.message : 'Unknown error'
+        }
+      };
+    }
+  }
+
+  private generateSessionId(): string {
+    return `session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+  }
+
+  async listen(port: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.server = this.app.listen(port, '127.0.0.1', () => {
+        console.error(`[MCP] 🌐 HTTP server listening on http://127.0.0.1:${port}/mcp`);
+        resolve();
+      });
+
+      this.server.on('error', (error: any) => {
+        if (error.code === 'EADDRINUSE') {
+          console.error(`[MCP] ❌ Port ${port} is already in use`);
+          reject(new Error(`Port ${port} is already in use`));
+        } else {
+          console.error('[MCP] ❌ HTTP server error:', error);
+          reject(error);
+        }
+      });
+    });
+  }
+
+  async close(): Promise<void> {
+    if (this.server) {
+      return new Promise((resolve) => {
+        this.server.close(() => {
+          console.error('[MCP] 🛑 HTTP server closed');
+          resolve();
+        });
+      });
+    }
+  }
+}
+
 // Start the server
 async function main() {
   console.error('[MCP] 🚀 Starting Interactive MCP server...');
   console.error(`[MCP] 📊 Environment - Router port: ${process.env.MCP_ROUTER_PORT || '8547'}, Host: ${process.env.MCP_ROUTER_HOST || 'localhost'}`);
 
-  const transport = new StdioServerTransport();
+  // Determine transport type from environment
+  const useHttp = process.env.MCP_TRANSPORT === 'http' || process.env.MCP_HTTP_PORT;
+  const httpPort = parseInt(process.env.MCP_HTTP_PORT || '8090', 10);
 
-  // Connect to shared router
+  // Connect to shared router (for VS Code extension communication)
   try {
     await connectToRouter();
-    // Use stderr for logging to avoid corrupting MCP stdio (stdout)
     console.error('[MCP] ✅ Successfully connected to shared router');
   } catch (error) {
     console.error('[MCP] ⚠️ Failed to connect to shared router:', error instanceof Error ? error.message : error);
     console.error('[MCP] 🔄 Will continue without router - VS Code extension may not be running');
   }
 
-  // Connect MCP stdio transport
-  await server.connect(transport);
-  console.error('[MCP] 🚀 MCP server ready on stdio transport');
-  console.error('[MCP] 📡 Waiting for client connections...');
+  if (useHttp) {
+    // Use HTTP transport
+    console.error(`[MCP] 🌐 Starting HTTP transport on port ${httpPort}`);
+    const httpTransport = new HttpServerTransport(server);
+    
+    try {
+      await httpTransport.listen(httpPort);
+      console.error(`[MCP] 🚀 MCP server ready on HTTP transport at http://localhost:${httpPort}/mcp`);
+      console.error('[MCP] 📡 Waiting for HTTP client connections...');
+      
+      // Keep the process alive
+      process.on('SIGINT', async () => {
+        console.error('\n[MCP] 🛑 Received SIGINT, shutting down HTTP server...');
+        await httpTransport.close();
+        process.exit(0);
+      });
+
+      process.on('SIGTERM', async () => {
+        console.error('\n[MCP] 🛑 Received SIGTERM, shutting down HTTP server...');
+        await httpTransport.close();
+        process.exit(0);
+      });
+
+    } catch (error) {
+      console.error('[MCP] ❌ Failed to start HTTP server:', error);
+      process.exit(1);
+    }
+  } else {
+    // Use stdio transport (default)
+    console.error('[MCP] 📟 Using stdio transport');
+    const transport = new StdioServerTransport();
+    
+    await server.connect(transport);
+    console.error('[MCP] 🚀 MCP server ready on stdio transport');
+    console.error('[MCP] 📡 Waiting for client connections...');
+  }
 }
 
 main().catch((error) => {

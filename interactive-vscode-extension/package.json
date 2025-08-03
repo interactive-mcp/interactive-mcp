@@ -2,7 +2,7 @@
   "name": "interactive-mcp",
   "displayName": "Interactive MCP",
   "description": "Enable AI assistants to ask YOU for input through interactive popups, without interrupting the flow of the conversation.",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "publisher": "raz-labs",
   "icon": "icon.png",
   "author": {
@@ -105,6 +105,13 @@
           "minimum": 0,
           "maximum": 100,
           "description": "Chime volume (0-100). Note: May be system-dependent."
+        },
+        "interactiveMcp.mcpHttpPort": {
+          "type": "number",
+          "default": 8090,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Port for the MCP HTTP server (used when running in HTTP mode)"
         }
       }
     }

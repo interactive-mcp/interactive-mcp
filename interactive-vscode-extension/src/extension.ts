@@ -551,13 +551,21 @@ async function startNewServer(context: vscode.ExtensionContext): Promise<boolean
         const workspaceId = getWorkspaceId(context);
         logInfo(`🔍 Starting MCP server with workspace: ${workspaceId}`);
 
+        // Start MCP server in HTTP mode
+        const config = vscode.workspace.getConfiguration("interactiveMcp");
+        const mcpHttpPort = config.get<number>("mcpHttpPort") || 8090;
+        
+        logInfo(`🌐 Starting MCP server in HTTP mode on port ${mcpHttpPort}`);
+        
         mcpServerProcess = spawn('node', [serverPath], {
             stdio: ['pipe', 'pipe', 'pipe'],
             env: {
                 ...process.env,
                 NODE_ENV: 'production',
                 MCP_WORKSPACE: workspaceId,
-                VSCODE_WORKSPACE: workspaceId
+                VSCODE_WORKSPACE: workspaceId,
+                MCP_TRANSPORT: 'http',
+                MCP_HTTP_PORT: mcpHttpPort.toString()
             }
         });
 
@@ -586,7 +594,8 @@ async function startNewServer(context: vscode.ExtensionContext): Promise<boolean
         
         const success = mcpServerProcess !== undefined;
         if (success) {
-            logInfo('✅ MCP server started successfully and ready for connections');
+            logInfo(`✅ MCP server started successfully in HTTP mode on port ${mcpHttpPort}`);
+            logInfo(`🔗 MCP clients can connect to: http://localhost:${mcpHttpPort}/mcp`);
         } else {
             logError('❌ MCP server failed to start within timeout period');
         }

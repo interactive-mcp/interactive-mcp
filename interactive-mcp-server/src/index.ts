@@ -24,15 +24,42 @@ const pendingRequests = new Map<string, {
 
 // Get workspace identifier from current working directory or environment
 function getWorkspaceId(): string {
-  // Use CWD as workspace identifier (this will be the directory where Claude Desktop starts the MCP server)
-  const cwd = process.cwd();
-  
-  // Check if there's a workspace hint in environment variables
+  console.error(`[MCP] 🚀 getWorkspaceId() called - PID: ${process.pid}`);
+
+  // Check if there's a workspace hint in environment variables first
   const envWorkspace = process.env.VSCODE_WORKSPACE || process.env.MCP_WORKSPACE;
   if (envWorkspace) {
+    console.error(`[MCP] 🔍 Using workspace from environment: ${envWorkspace}`);
     return path.resolve(envWorkspace);
   }
-  
+
+  // Use CWD as workspace identifier (this will be the directory where Claude Desktop starts the MCP server)
+  const cwd = process.cwd();
+  console.error(`[MCP] 🔍 Using workspace from CWD: ${cwd}`);
+
+  // Always try to find the interactive-mcp workspace for better coordination
+  const userHome = require('os').homedir();
+  const possibleWorkspaces = [
+    path.join(userHome, 'Desktop', 'interactive-mcp'),
+    path.join(userHome, 'Documents', 'interactive-mcp'),
+    path.join(userHome, 'interactive-mcp')
+  ];
+
+  for (const workspace of possibleWorkspaces) {
+    if (require('fs').existsSync(workspace)) {
+      console.error(`[MCP] ✅ Found interactive-mcp workspace: ${workspace}`);
+      console.error(`[MCP] 🔄 Switching from CWD (${cwd}) to workspace (${workspace})`);
+      return path.resolve(workspace);
+    }
+  }
+
+  // If CWD looks like a VS Code installation path, warn about it
+  if (cwd.includes('Microsoft VS Code') || cwd.includes('VSCode')) {
+    console.error(`[MCP] ⚠️ Warning: CWD appears to be VS Code installation path, not a workspace`);
+    console.error(`[MCP] ⚠️ This indicates the MCP server was started by an AI assistant, not VS Code extension`);
+    console.error(`[MCP] ⚠️ Could not find interactive-mcp workspace, using CWD as fallback`);
+  }
+
   // Fallback to current working directory
   return path.resolve(cwd);
 }
@@ -52,7 +79,7 @@ function connectToRouter(): Promise<void> {
       
       // Register with router
       workspaceId = getWorkspaceId();
-      sessionId = `mcp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      sessionId = `mcp-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
       
       console.error(`[MCP] 📝 Registering with router - Workspace: ${workspaceId}, Session: ${sessionId}`);
       
@@ -541,8 +568,11 @@ function registerTools(): void {
 
 // Start the server
 async function main() {
+  console.error('[MCP] 🚀 Starting Interactive MCP server...');
+  console.error(`[MCP] 📊 Environment - Router port: ${process.env.MCP_ROUTER_PORT || '8547'}, Host: ${process.env.MCP_ROUTER_HOST || 'localhost'}`);
+
   const transport = new StdioServerTransport();
-  
+
   // Connect to shared router
   try {
     await connectToRouter();
@@ -552,10 +582,11 @@ async function main() {
     console.error('[MCP] ⚠️ Failed to connect to shared router:', error instanceof Error ? error.message : error);
     console.error('[MCP] 🔄 Will continue without router - VS Code extension may not be running');
   }
-  
+
   // Connect MCP stdio transport
   await server.connect(transport);
   console.error('[MCP] 🚀 MCP server ready on stdio transport');
+  console.error('[MCP] 📡 Waiting for client connections...');
 }
 
 main().catch((error) => {

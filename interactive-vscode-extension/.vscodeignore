@@ -10,10 +10,10 @@ vsc-extension-quickstart.md
 **/.eslintrc.json
 **/*.map
 **/*.ts
+esbuild.js
 
-# Exclude all node_modules except what we explicitly need
+# Exclude node_modules since dependencies are bundled
 node_modules/**
-!node_modules/ws/**
 
 # Keep only the bundled server
 !bundled-server/**

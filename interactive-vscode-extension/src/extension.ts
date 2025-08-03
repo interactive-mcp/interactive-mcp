@@ -3,6 +3,7 @@ import WebSocket from 'ws';
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
+import { PopupWebviewProvider, PopupConfig } from './PopupWebviewProvider';
 
 let wsClient: WebSocket | undefined;
 let statusBarItem: vscode.StatusBarItem;
@@ -10,6 +11,7 @@ let mcpServerProcess: ChildProcess | undefined;
 let routerProcess: ChildProcess | undefined;
 let outputChannel: vscode.OutputChannel;
 let extensionPath: string;
+let extensionContext: vscode.ExtensionContext;
 let chimeToggleItem: vscode.StatusBarItem;
 let workspaceId: string;
 let sessionId: string;
@@ -437,6 +439,7 @@ export function activate(context: vscode.ExtensionContext) {
     outputChannel = vscode.window.createOutputChannel('Interactive MCP');
     context.subscriptions.push(outputChannel);
     extensionPath = context.extensionPath;
+    extensionContext = context;
     
     logInfo('Interactive MCP Helper is activating...');
     
@@ -460,7 +463,9 @@ export function activate(context: vscode.ExtensionContext) {
         updateChimeToggle();
     }));
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration('interactiveMcp.chimeEnabled')) updateChimeToggle();
+        if (e.affectsConfiguration('interactiveMcp.chimeEnabled')) {
+            updateChimeToggle();
+        }
     }));
 
     // Register commands
@@ -1276,32 +1281,30 @@ async function handleMcpRequest(message: any) {
 }
 
 async function handleButtonsRequest(options: any): Promise<any> {
-    return new Promise((resolve) => {
-        // Create a webview panel but try to make it modal-like
-        const panel = vscode.window.createWebviewPanel(
-            'mcpButtonDialog',
-            '', // Empty title to minimize tab appearance
-            { viewColumn: vscode.ViewColumn.One, preserveFocus: false },
-            {
-                enableScripts: true,
-                retainContextWhenHidden: false,
-                localResourceRoots: []
-            }
-        );
+    return new Promise(async (resolve) => {
         playAlertSound();
 
-        // Get current theme
-        const currentTheme = vscode.window.activeColorTheme.kind;
-        const isDark = currentTheme === vscode.ColorThemeKind.Dark || currentTheme === vscode.ColorThemeKind.HighContrast;
+        // Convert options to PopupConfig format
+        const popupConfig: PopupConfig = {
+            title: options.title || 'Select Option',
+            content: options.message || '',
+            type: 'question',
+            buttons: options.options ? options.options.map((opt: any) => ({
+                id: opt.value,
+                label: opt.label,
+                style: 'primary'
+            })) : undefined
+        };
 
-        // Create custom HTML for the modal with improved styling
-        panel.webview.html = createButtonDialogHTML(options, isDark);
+        // Create popup using new provider
+        const provider = new PopupWebviewProvider(extensionContext, popupConfig);
+        const panel = await provider.createWebview();
 
         // Handle messages from the webview
         panel.webview.onDidReceiveMessage(
             message => {
-                if (message.command === 'buttonClicked') {
-                    resolve({ value: message.value });
+                if (message.type === 'button_click') {
+                    resolve({ value: message.buttonId });
                     panel.dispose();
                 } else if (message.command === 'textInput') {
                     resolve({ value: message.text });
@@ -2148,26 +2151,20 @@ function createTextInputHTML(options: any, isDark: boolean): string {
 }
 
 async function handleTextRequest(options: any): Promise<any> {
-    return new Promise((resolve) => {
-        // Create a webview panel for text input
-        const panel = vscode.window.createWebviewPanel(
-            'mcpTextDialog',
-            '',
-            { viewColumn: vscode.ViewColumn.One, preserveFocus: false },
-            {
-                enableScripts: true,
-                retainContextWhenHidden: false,
-                localResourceRoots: []
-            }
-        );
+    return new Promise(async (resolve) => {
         playAlertSound();
 
-        // Get current theme
-        const currentTheme = vscode.window.activeColorTheme.kind;
-        const isDark = currentTheme === vscode.ColorThemeKind.Dark || currentTheme === vscode.ColorThemeKind.HighContrast;
+        // Convert options to PopupConfig format
+        const popupConfig: PopupConfig = {
+            title: options.title || 'Enter Text',
+            content: options.prompt || '',
+            type: 'input',
+            inputPlaceholder: options.placeholder || 'Enter text...'
+        };
 
-        // Create custom HTML for text input
-        panel.webview.html = createTextInputHTML(options, isDark);
+        // Create popup using new provider
+        const provider = new PopupWebviewProvider(extensionContext, popupConfig);
+        const panel = await provider.createWebview();
 
         // Handle messages from the webview
         panel.webview.onDidReceiveMessage(
@@ -2190,32 +2187,38 @@ async function handleTextRequest(options: any): Promise<any> {
 }
 
 async function handleConfirmRequest(options: any): Promise<any> {
-    return new Promise((resolve) => {
-        // Create a webview panel for confirmation
-        const panel = vscode.window.createWebviewPanel(
-            'mcpConfirmDialog',
-            '',
-            { viewColumn: vscode.ViewColumn.One, preserveFocus: false },
-            {
-                enableScripts: true,
-                retainContextWhenHidden: false,
-                localResourceRoots: []
-            }
-        );
+    return new Promise(async (resolve) => {
         playAlertSound();
 
-        // Get current theme
-        const currentTheme = vscode.window.activeColorTheme.kind;
-        const isDark = currentTheme === vscode.ColorThemeKind.Dark || currentTheme === vscode.ColorThemeKind.HighContrast;
+        // Convert options to PopupConfig format
+        const popupConfig: PopupConfig = {
+            title: options.title || 'Confirm Action',
+            content: options.message || '',
+            type: 'confirmation',
+            buttons: [
+                {
+                    id: 'cancel',
+                    label: 'Cancel',
+                    style: 'secondary'
+                },
+                {
+                    id: 'confirm',
+                    label: 'Confirm',
+                    style: 'primary'
+                }
+            ]
+        };
 
-        // Create custom HTML for confirmation
-        panel.webview.html = createConfirmHTML(options, isDark);
+        // Create popup using new provider
+        const provider = new PopupWebviewProvider(extensionContext, popupConfig);
+        const panel = await provider.createWebview();
 
         // Handle messages from the webview
         panel.webview.onDidReceiveMessage(
             message => {
-                if (message.command === 'confirmed') {
-                    resolve({ confirmed: message.confirmed });
+                if (message.type === 'button_click') {
+                    const confirmed = message.buttonId === 'confirm';
+                    resolve({ confirmed });
                     panel.dispose();
                 } else if (message.command === 'textInput') {
                     resolve({ value: message.text });
@@ -2276,7 +2279,9 @@ function renderMarkdown(md: string): string {
     }
     html += processed + '<br>';
   });
-  if (inList) html += `</${listType}>`;
+  if (inList) {
+    html += `</${listType}>`;
+  }
 
   // Restore code blocks
   html = html.replace(/{{CODEBLOCK_(\d+)}}/g, (match, index) => codeBlocks[parseInt(index)]);
@@ -2346,7 +2351,9 @@ export function deactivate() {
 
 function playAlertSound() {
   const config = vscode.workspace.getConfiguration('interactiveMcp');
-  if (!config.get<boolean>('chimeEnabled', true)) return;
+  if (!config.get<boolean>('chimeEnabled', true)) {
+    return;
+  }
   const volume = config.get<number>('chimeVolume', 50) / 100;
   const soundPath = path.join(extensionPath, 'sounds', 'chime.wav');
   outputChannel.appendLine(`[Sound] Attempting playback at: ${soundPath}`);

@@ -2,9 +2,7 @@
 
 Transform your AI conversations with seamless interactive prompts directly in VS Code. Never lose your flow when AI assistants need user input!
 
-![Example Interactive Popup 1](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example-1.png)
-
-![Example Interactive Popup 2](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example-2.png)
+![Example Interactive Popup 1](https://raw.githubusercontent.com/interactive-mcp/interactive-mcp/main/interactive-vscode-extension/assets/popup-example-1.jpg)
 
 ## 🚀 What This Project Does
 

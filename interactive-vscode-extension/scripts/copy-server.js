@@ -66,35 +66,63 @@ try {
         path.join(bundledDir, 'package.json')
     );
     
-    // Copy node_modules (only production dependencies)
+    // Copy only the external dependencies that aren't bundled
     const serverPackageJson = JSON.parse(fs.readFileSync(path.join(serverDir, 'package.json'), 'utf8'));
-    if (serverPackageJson.dependencies) {
-        console.log('📦 Copying production dependencies...');
-        const serverNodeModulesDir = path.join(serverDir, 'node_modules');
-        const bundledNodeModulesDir = path.join(bundledDir, 'node_modules');
-        
-        // Copy the entire node_modules directory
-        if (fs.existsSync(serverNodeModulesDir)) {
-            copyDir(serverNodeModulesDir, bundledNodeModulesDir);
-            console.log('✅ Dependencies copied successfully');
-        } else {
-            console.log('⚠️  No node_modules found in server directory');
+    const serverNodeModulesDir = path.join(serverDir, 'node_modules');
+    const bundledNodeModulesDir = path.join(bundledDir, 'node_modules');
+    
+    // Only copy external dependencies (everything else is bundled by esbuild)
+    const externalDeps = ['ws']; // Only ws has native bindings that can't be bundled
+    const scopedDeps = []; // No scoped dependencies needed - all bundled
+    
+    if (fs.existsSync(serverNodeModulesDir)) {
+        // Copy regular dependencies
+        for (const dep of externalDeps) {
+            const depSrcPath = path.join(serverNodeModulesDir, dep);
+            const depDestPath = path.join(bundledNodeModulesDir, dep);
+            
+            if (fs.existsSync(depSrcPath)) {
+                console.log(`📦 Copying external dependency: ${dep}...`);
+                copyDir(depSrcPath, depDestPath, ['.bin', '.cache']);
+            } else {
+                console.log(`⚠️  External dependency ${dep} not found`);
+            }
         }
         
-        // Create a minimal package.json for the bundled server
-        const bundledPackageJson = {
-            name: serverPackageJson.name,
-            version: serverPackageJson.version,
-            main: serverPackageJson.main,
-            type: serverPackageJson.type,
-            dependencies: serverPackageJson.dependencies
-        };
-        
-        fs.writeFileSync(
-            path.join(bundledDir, 'package.json'),
-            JSON.stringify(bundledPackageJson, null, 2)
-        );
+        // Copy scoped dependencies (entire scope directory)
+        for (const scope of scopedDeps) {
+            const scopeSrcPath = path.join(serverNodeModulesDir, scope);
+            const scopeDestPath = path.join(bundledNodeModulesDir, scope);
+            
+            if (fs.existsSync(scopeSrcPath)) {
+                console.log(`📦 Copying scoped dependency: ${scope}...`);
+                copyDir(scopeSrcPath, scopeDestPath, ['.bin', '.cache']);
+            } else {
+                console.log(`⚠️  Scoped dependency ${scope} not found`);
+            }
+        }
     }
+    
+    // Create package.json with only external dependencies
+    const bundledPackageJson = {
+        name: serverPackageJson.name,
+        version: serverPackageJson.version,
+        main: serverPackageJson.main,
+        type: serverPackageJson.type,
+        dependencies: {
+            'ws': serverPackageJson.dependencies.ws
+        },
+        scripts: {
+            start: "node dist/index.js"
+        }
+    };
+    
+    fs.writeFileSync(
+        path.join(bundledDir, 'package.json'),
+        JSON.stringify(bundledPackageJson, null, 2)
+    );
+    
+    console.log('✅ Server bundled successfully (external dependencies copied)!');
     
     console.log('✅ MCP server bundled successfully!');
     console.log('📍 Bundled to:', bundledDir);

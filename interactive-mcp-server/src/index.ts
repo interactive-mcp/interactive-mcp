@@ -4,8 +4,8 @@ import { z } from "zod";
 import WebSocket from "ws";
 import { createHash } from "crypto";
 import * as path from "path";
-import express from "express";
-import cors from "cors";
+import http from "http";
+import url from "url";
 import { normalizeWorkspacePath, areWorkspacePathsRelated } from "./path-utils.js";
 
 // Shared router connection
@@ -570,48 +570,89 @@ function registerTools(): void {
 
 // HTTP Transport Implementation
 class HttpServerTransport {
-  private app: express.Application;
-  private server: any;
+  private server: http.Server;
   private sessionStates = new Map<string, any>();
   private mcpServer: McpServer;
 
   constructor(mcpServer: McpServer) {
     this.mcpServer = mcpServer;
-    this.app = express();
-    this.setupMiddleware();
-    this.setupRoutes();
+    this.server = http.createServer(this.handleRequest.bind(this));
   }
 
-  private setupMiddleware() {
+  private setCorsHeaders(res: http.ServerResponse, origin?: string) {
     // Enable CORS for localhost connections
-    this.app.use(cors({
-      origin: ['http://localhost:*', 'http://127.0.0.1:*'],
-      credentials: true
-    }));
-    
-    this.app.use(express.json());
-    
-    // Validate Origin header to prevent DNS rebinding attacks
-    this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-      const origin = req.get('Origin');
-      if (origin && !origin.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/)) {
-        return res.status(403).json({ error: 'Invalid origin' });
-      }
-      next();
+    if (origin && origin.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', 'http://localhost:*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+
+  private parseJsonBody(req: http.IncomingMessage): Promise<any> {
+    return new Promise((resolve, reject) => {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (error) {
+          reject(new Error('Invalid JSON'));
+        }
+      });
+      req.on('error', reject);
     });
   }
 
-  private setupRoutes() {
-    // Main MCP endpoint - handles both POST and GET
-    this.app.post('/mcp', this.handlePost.bind(this));
-    this.app.get('/mcp', this.handleGet.bind(this));
-    this.app.delete('/mcp', this.handleDelete.bind(this));
+  private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
+    const parsedUrl = url.parse(req.url || '', true);
+    const pathname = parsedUrl.pathname;
+    const origin = req.headers.origin as string;
+
+    // Set CORS headers
+    this.setCorsHeaders(res, origin);
+
+    // Handle preflight OPTIONS requests
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+
+    // Validate Origin header to prevent DNS rebinding attacks
+    if (origin && !origin.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid origin' }));
+      return;
+    }
+
+    // Route to MCP endpoint
+    if (pathname === '/mcp') {
+      if (req.method === 'POST') {
+        await this.handlePost(req, res);
+      } else if (req.method === 'GET') {
+        await this.handleGet(req, res);
+      } else if (req.method === 'DELETE') {
+        this.handleDelete(req, res);
+      } else {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Method not allowed' }));
+      }
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not found' }));
+    }
   }
 
-  private async handlePost(req: express.Request, res: express.Response) {
+  private async handlePost(req: http.IncomingMessage, res: http.ServerResponse) {
     try {
-      const sessionId = req.get('Mcp-Session-Id');
-      const message = req.body;
+      const sessionId = req.headers['mcp-session-id'] as string;
+      const body = await this.parseJsonBody(req);
+      const message = body;
       
       // Debug logging for all requests
       console.error(`[MCP] 📥 HTTP POST request received: ${message.method || 'unknown method'}`);
@@ -631,12 +672,14 @@ class HttpServerTransport {
         if (message.method === 'tools/list' || message.method === 'resources/list' || message.method === 'prompts/list') {
           console.error(`[MCP] ⚠️ Allowing ${message.method} without valid session for client compatibility`);
         } else {
-          return res.status(404).json({ error: 'Session not found' });
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Session not found' }));
+          return;
         }
       }
 
       // Check if client wants streaming response
-      const acceptHeader = req.get('Accept') || '';
+      const acceptHeader = req.headers.accept || '';
       const wantsSSE = acceptHeader.includes('text/event-stream') && !acceptHeader.includes('application/json');
 
       if (wantsSSE && message.method) {
@@ -653,7 +696,8 @@ class HttpServerTransport {
           if (response === null) {
             // This was a notification - no response needed
             console.error(`[MCP] 📤 No response needed for notification (SSE): ${message.method}`);
-            res.status(202).end();
+            res.writeHead(202);
+            res.end();
           } else {
             console.error(`[MCP] 📤 Sending SSE response for ${message.method}:`, JSON.stringify(response, null, 2));
             // Send the response as SSE event
@@ -684,14 +728,17 @@ class HttpServerTransport {
             if (response === null) {
               // This was a notification - no response needed
               console.error(`[MCP] 📤 No response needed for notification: ${message.method}`);
-              res.status(202).send();
+              res.writeHead(202);
+              res.end();
             } else {
               console.error(`[MCP] 📤 Sending response for ${message.method}:`, JSON.stringify(response, null, 2));
-              res.json(response);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(response));
             }
           } catch (processError) {
             console.error(`[MCP] ❌ Error processing message ${message.method}:`, processError);
-            res.status(500).json({
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
               error: {
@@ -699,24 +746,26 @@ class HttpServerTransport {
                 message: "Internal error during message processing",
                 data: processError instanceof Error ? processError.message : String(processError)
               }
-            });
+            }));
           }
         } else {
           // This is a notification or response - acknowledge it
-          res.status(202).send();
+          res.writeHead(202);
+          res.end();
         }
       }
     } catch (error) {
       console.error('[MCP] ❌ Error handling POST request:', error);
-      res.status(500).json({ 
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ 
         error: 'Internal server error',
         message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      }));
     }
   }
 
-  private async handleGet(req: express.Request, res: express.Response) {
-    const acceptHeader = req.get('Accept') || '';
+  private async handleGet(req: http.IncomingMessage, res: http.ServerResponse) {
+    const acceptHeader = req.headers.accept || '';
     
     if (acceptHeader.includes('text/event-stream')) {
       // Setup SSE stream for server-initiated messages
@@ -736,19 +785,22 @@ class HttpServerTransport {
       // Keep connection open
       // In a real implementation, you'd send server-initiated messages here
     } else {
-      res.status(405).json({ error: 'Method not allowed without SSE accept header' });
+      res.writeHead(405, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Method not allowed without SSE accept header' }));
     }
   }
 
-  private handleDelete(req: express.Request, res: express.Response) {
-    const sessionId = req.get('Mcp-Session-Id');
+  private handleDelete(req: http.IncomingMessage, res: http.ServerResponse) {
+    const sessionId = req.headers['mcp-session-id'] as string;
     
     if (sessionId && this.sessionStates.has(sessionId)) {
       this.sessionStates.delete(sessionId);
       console.error(`[MCP] 🗑️ Deleted session: ${sessionId}`);
-      res.status(200).send();
+      res.writeHead(200);
+      res.end();
     } else {
-      res.status(404).json({ error: 'Session not found' });
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Session not found' }));
     }
   }
 
@@ -950,7 +1002,7 @@ class HttpServerTransport {
 
   async listen(port: number): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.server = this.app.listen(port, '127.0.0.1', () => {
+      this.server.listen(port, '127.0.0.1', () => {
         console.error(`[MCP] 🌐 HTTP server listening on http://127.0.0.1:${port}/mcp`);
         resolve();
       });

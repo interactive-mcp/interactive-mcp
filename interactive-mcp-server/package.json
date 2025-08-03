@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "node esbuild.js --production",
+    "build:dev": "node esbuild.js",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js"
   },
@@ -19,15 +20,12 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.5",
     "ws": "^8.18.0",
-    "zod": "^3.25.67",
-    "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "zod": "^3.25.67"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/ws": "^8.5.14",
-    "@types/express": "^4.17.21",
-    "@types/cors": "^2.8.17",
+    "esbuild": "^0.25.8",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

@@ -612,6 +612,12 @@ class HttpServerTransport {
     try {
       const sessionId = req.get('Mcp-Session-Id');
       const message = req.body;
+      
+      // Debug logging for all requests
+      console.error(`[MCP] 📥 HTTP POST request received: ${message.method || 'unknown method'}`);
+      console.error(`[MCP] 📋 Request body:`, JSON.stringify(message, null, 2));
+      console.error(`[MCP] 🔑 Session ID: ${sessionId || 'none'}`);
+      console.error(`[MCP] 📨 Headers:`, JSON.stringify(req.headers, null, 2));
 
       // Handle session management
       if (message.method === 'initialize') {
@@ -620,12 +626,18 @@ class HttpServerTransport {
         res.setHeader('Mcp-Session-Id', newSessionId);
         console.error(`[MCP] 🆔 Created new session: ${newSessionId}`);
       } else if (sessionId && !this.sessionStates.has(sessionId)) {
-        return res.status(404).json({ error: 'Session not found' });
+        // For compatibility with clients that don't properly handle sessions,
+        // allow requests without valid session IDs for read-only operations
+        if (message.method === 'tools/list' || message.method === 'resources/list' || message.method === 'prompts/list') {
+          console.error(`[MCP] ⚠️ Allowing ${message.method} without valid session for client compatibility`);
+        } else {
+          return res.status(404).json({ error: 'Session not found' });
+        }
       }
 
       // Check if client wants streaming response
       const acceptHeader = req.get('Accept') || '';
-      const wantsSSE = acceptHeader.includes('text/event-stream');
+      const wantsSSE = acceptHeader.includes('text/event-stream') && !acceptHeader.includes('application/json');
 
       if (wantsSSE && message.method) {
         // Return SSE stream for requests
@@ -634,17 +646,61 @@ class HttpServerTransport {
         res.setHeader('Connection', 'keep-alive');
 
         // Process the request and stream the response
-        const response = await this.processMessage(message);
-        
-        // Send the response as SSE event
-        res.write(`data: ${JSON.stringify(response)}\n\n`);
-        res.end();
+        console.error(`[MCP] 🔄 Processing message (SSE): ${message.method}`);
+        try {
+          const response = await this.processMessage(message);
+          console.error(`[MCP] ✅ Message processed successfully (SSE): ${message.method}`);
+          if (response === null) {
+            // This was a notification - no response needed
+            console.error(`[MCP] 📤 No response needed for notification (SSE): ${message.method}`);
+            res.status(202).end();
+          } else {
+            console.error(`[MCP] 📤 Sending SSE response for ${message.method}:`, JSON.stringify(response, null, 2));
+            // Send the response as SSE event
+            res.write(`data: ${JSON.stringify(response)}\n\n`);
+            res.end();
+          }
+        } catch (processError) {
+          console.error(`[MCP] ❌ Error processing message (SSE) ${message.method}:`, processError);
+          res.write(`data: ${JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: {
+              code: -32603,
+              message: "Internal error during message processing",
+              data: processError instanceof Error ? processError.message : String(processError)
+            }
+          })}\n\n`);
+          res.end();
+        }
       } else {
         // Handle regular JSON response
         if (message.method) {
           // This is a request - process it
-          const response = await this.processMessage(message);
-          res.json(response);
+          console.error(`[MCP] 🔄 Processing message: ${message.method}`);
+          try {
+            const response = await this.processMessage(message);
+            console.error(`[MCP] ✅ Message processed successfully: ${message.method}`);
+            if (response === null) {
+              // This was a notification - no response needed
+              console.error(`[MCP] 📤 No response needed for notification: ${message.method}`);
+              res.status(202).send();
+            } else {
+              console.error(`[MCP] 📤 Sending response for ${message.method}:`, JSON.stringify(response, null, 2));
+              res.json(response);
+            }
+          } catch (processError) {
+            console.error(`[MCP] ❌ Error processing message ${message.method}:`, processError);
+            res.status(500).json({
+              jsonrpc: "2.0",
+              id: message.id,
+              error: {
+                code: -32603,
+                message: "Internal error during message processing",
+                data: processError instanceof Error ? processError.message : String(processError)
+              }
+            });
+          }
         } else {
           // This is a notification or response - acknowledge it
           res.status(202).send();
@@ -857,6 +913,12 @@ class HttpServerTransport {
             }
           };
         });
+      }
+
+      // Handle notifications (no response needed)
+      if (message.method === 'notifications/initialized') {
+        console.error(`[MCP] 🔔 Received notification: ${message.method}`);
+        return null; // No response needed for notifications
       }
 
       // Handle other methods

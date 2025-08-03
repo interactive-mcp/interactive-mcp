@@ -630,7 +630,7 @@ function getServerPath(context: vscode.ExtensionContext): string | null {
     
     // Check if bundled server exists
     try {
-        const fs = require('fs');
+        // fs is already imported at the top
         if (fs.existsSync(bundledServerPath)) {
             return bundledServerPath;
         }
@@ -2666,7 +2666,7 @@ async function getProcessUsingPort(port: number): Promise<{ pid: number; command
         
         logDebug(`🔍 Checking port ${port} with command: ${command}`);
         
-        const { spawn } = require('child_process');
+        // spawn is already imported at the top
         const proc = spawn(command, { shell: true, stdio: ['pipe', 'pipe', 'pipe'] });
         
         let output = '';
@@ -2744,7 +2744,7 @@ async function killProcess(pid: number): Promise<boolean> {
         const isWindows = process.platform === 'win32';
         const command = isWindows ? `taskkill /F /PID ${pid}` : `kill -9 ${pid}`;
         
-        const { spawn } = require('child_process');
+        // spawn is already imported at the top
         const proc = spawn(command, { shell: true, stdio: ['pipe', 'pipe', 'pipe'] });
         
         proc.on('close', (code: number | null) => {
@@ -2761,7 +2761,7 @@ async function testIfOurRouter(port: number): Promise<boolean> {
 
     return new Promise((resolve) => {
         try {
-            const testSocket = new (require("ws"))(`ws://localhost:${port}`);
+            const testSocket = new WebSocket(`ws://localhost:${port}`);
             let resolved = false;
 
             const cleanup = () => {
@@ -2871,7 +2871,7 @@ async function waitForRouterHealth(port: number, maxWaitMs: number = 10000): Pro
 async function testRouterConnection(port: number): Promise<boolean> {
     return new Promise((resolve) => {
         try {
-            const testSocket = new (require("ws"))(`ws://localhost:${port}`);
+            const testSocket = new WebSocket(`ws://localhost:${port}`);
             let resolved = false;
             
             const cleanup = () => {

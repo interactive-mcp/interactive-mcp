@@ -7,6 +7,8 @@ import * as path from "path";
 import http from "http";
 import url from "url";
 import { normalizeWorkspacePath, areWorkspacePathsRelated } from "./path-utils.js";
+import * as os from 'os';
+import * as fs from 'fs';
 
 // Shared router connection
 let routerClient: WebSocket | undefined;
@@ -40,7 +42,7 @@ function getWorkspaceId(): string {
   console.error(`[MCP] 🔍 Using workspace from CWD: ${cwd}`);
 
   // Always try to find the interactive-mcp workspace for better coordination
-  const userHome = require('os').homedir();
+  const userHome = os.homedir();
   const possibleWorkspaces = [
     path.join(userHome, 'Desktop', 'interactive-mcp'),
     path.join(userHome, 'Documents', 'interactive-mcp'),
@@ -48,7 +50,7 @@ function getWorkspaceId(): string {
   ];
 
   for (const workspace of possibleWorkspaces) {
-    if (require('fs').existsSync(workspace)) {
+    if (fs.existsSync(workspace)) {
       console.error(`[MCP] ✅ Found interactive-mcp workspace: ${workspace}`);
       console.error(`[MCP] 🔄 Switching from CWD (${cwd}) to workspace (${workspace})`);
       return path.resolve(workspace);
@@ -891,8 +893,7 @@ class HttpServerTransport {
                   required: ["title", "message"]
                 }
               }
-            ],
-            nextCursor: null
+            ]
           }
         };
       }

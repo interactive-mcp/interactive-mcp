@@ -55,12 +55,34 @@ export class SharedRouter {
   }>();
 
   constructor(port: number = 8547) {
+    // Create WebSocket server with proper error handling setup
     this.wss = new WebSocketServer({ port });
+
+    // Set up error handling BEFORE the server starts listening
+    this.setupServerErrorHandling();
     this.setupServer();
-    
+
     // Handle successful listening
     this.wss.on('listening', () => {
       console.log(`[SharedRouter] WebSocket router listening on port ${port}`);
+    });
+  }
+
+  private setupServerErrorHandling(): void {
+    // Handle server-level errors with improved recovery
+    this.wss.on('error', (error: any) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`[SharedRouter] Port is already in use. Another router instance may be running.`);
+        console.error(`[SharedRouter] This is expected behavior when multiple VS Code instances are open.`);
+        // Don't exit - let the extension handle this gracefully
+        return;
+      } else {
+        console.error('[SharedRouter] Server error:', error);
+        // Only exit on truly fatal errors, not port conflicts
+        if (error.code !== 'EADDRINUSE') {
+          process.exit(1);
+        }
+      }
     });
   }
 
@@ -89,16 +111,6 @@ export class SharedRouter {
 
       // Send initial connection acknowledgment
       this.sendMessage(ws, { type: 'heartbeat' });
-    });
-
-    this.wss.on('error', (error: any) => {
-      if (error.code === 'EADDRINUSE') {
-        console.error(`[SharedRouter] Port is already in use. Another router instance may be running.`);
-        process.exit(1);
-      } else {
-        console.error('[SharedRouter] Server error:', error);
-        process.exit(1);
-      }
     });
 
     // Clean up orphaned requests periodically

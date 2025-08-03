@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "node esbuild.js --production",
+    "build:dev": "node esbuild.js",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js"
   },
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/ws": "^8.5.14",
+    "esbuild": "^0.25.8",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

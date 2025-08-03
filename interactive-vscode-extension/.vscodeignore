@@ -1,62 +1,39 @@
+# Source files and build artifacts
+src/**
+tsconfig.json
+esbuild.js
+scripts/**
+
+# Bundled dependencies - exclude node_modules from bundled projects
+# bundled-server/node_modules/**
+# bundled-router/node_modules/**
+
 # Development files
 .vscode/**
 .vscode-test/**
-src/**
-scripts/**
 .gitignore
-.yarnrc
-vsc-extension-quickstart.md
-**/tsconfig.json
-**/.eslintrc.json
+.eslintrc.json
+
+# Documentation and tests
+**/*.test.js
+**/*.test.ts
+test/**
+tests/**
+
+# Source maps (keep only for production debugging if needed)
 **/*.map
-**/*.ts
 
-# Exclude all node_modules except what we explicitly need
-node_modules/**
-!node_modules/ws/**
+# Package management
+**/package-lock.json
+bundled-server/package-lock.json
+bundled-router/package-lock.json
 
-# Keep only the bundled server
-!bundled-server/**
+# Build scripts in bundled directories
+bundled-server/scripts/**
+bundled-router/scripts/**
 
-# But exclude unnecessary files from bundled server
-bundled-server/node_modules/**/.bin/**
-bundled-server/node_modules/**/test/**
-bundled-server/node_modules/**/tests/**
-bundled-server/node_modules/**/*.test.js
-bundled-server/node_modules/**/*.test.d.ts
-bundled-server/node_modules/**/*.spec.js
-bundled-server/node_modules/**/*.spec.d.ts
-bundled-server/node_modules/**/README.md
-bundled-server/node_modules/**/readme.md
-bundled-server/node_modules/**/LICENSE*
-bundled-server/node_modules/**/license*
-bundled-server/node_modules/**/CHANGELOG*
-bundled-server/node_modules/**/changelog*
-bundled-server/node_modules/**/HISTORY*
-bundled-server/node_modules/**/history*
-bundled-server/node_modules/**/.github/**
-bundled-server/node_modules/**/.vscode/**
-bundled-server/node_modules/**/docs/**
-bundled-server/node_modules/**/doc/**
-bundled-server/node_modules/**/examples/**
-bundled-server/node_modules/**/example/**
-bundled-server/node_modules/**/sample/**
-bundled-server/node_modules/**/samples/**
-bundled-server/node_modules/**/demo/**
-bundled-server/node_modules/**/demos/**
-bundled-server/node_modules/**/*.md
-bundled-server/node_modules/**/*.txt
-bundled-server/node_modules/**/Makefile
-bundled-server/node_modules/**/makefile
-bundled-server/node_modules/**/.travis.yml
-bundled-server/node_modules/**/.npmignore
-bundled-server/node_modules/**/.gitignore
-bundled-server/node_modules/**/tsconfig.json
-bundled-server/node_modules/**/.eslintrc*
-bundled-server/node_modules/**/jest.config*
-bundled-server/node_modules/**/rollup.config*
-bundled-server/node_modules/**/webpack.config*
-bundled-server/node_modules/**/*.config.js
-bundled-server/node_modules/**/.* 
-!sounds/** 
-!assets/**
+# TypeScript source in bundled directories
+bundled-server/src/**
+bundled-router/src/**
+bundled-server/tsconfig.json
+bundled-router/tsconfig.json

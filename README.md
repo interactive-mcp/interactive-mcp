@@ -113,7 +113,19 @@ The configuration depends on which AI assistant you're using. Here's the general
 
 4. **Restart your IDE** completely
 
-**Note on Updates:** If you update the extension, you may need to update the path in your MCP JSON config file. Use the command palette ("Interactive MCP: Copy MCP JSON Configuration") to get the latest configuration and update your file accordingly.
+**🌐 HTTP Transport Option (Recommended):** For a simpler, update-resistant configuration, you can use HTTP transport instead:
+```json
+{
+  "mcpServers": {
+    "interactive-mcp": {
+      "url": "http://localhost:8090/mcp"
+    }
+  }
+}
+```
+This configuration won't break when you update the extension! See [HTTP-TRANSPORT-README.md](HTTP-TRANSPORT-README.md) for details.
+
+**Note on Updates:** If you use the traditional file-path configuration and update the extension, you may need to update the path in your MCP JSON config file. Use the command palette ("Interactive MCP: Copy MCP JSON Configuration") to get the latest configuration and update your file accordingly.
 
 #### 🔌 **Step 4: Connect the Extension**
 

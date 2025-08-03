@@ -80,48 +80,45 @@ try {
         path.join(bundledDir, 'package.json')
     );
     
-    // Copy only specific production dependencies to avoid permission issues
+    // Copy only the external dependencies that aren't bundled
     const routerPackageJson = JSON.parse(fs.readFileSync(path.join(routerDir, 'package.json'), 'utf8'));
-    if (routerPackageJson.dependencies) {
-        console.log('📦 Copying production dependencies...');
-        const routerNodeModulesDir = path.join(routerDir, 'node_modules');
-        const bundledNodeModulesDir = path.join(bundledDir, 'node_modules');
-        
-        if (fs.existsSync(routerNodeModulesDir)) {
-            // Only copy the specific dependencies we need (ws package)
-            const depsToInclude = Object.keys(routerPackageJson.dependencies);
-            console.log('📋 Dependencies to copy:', depsToInclude);
+    const routerNodeModulesDir = path.join(routerDir, 'node_modules');
+    const bundledNodeModulesDir = path.join(bundledDir, 'node_modules');
+    
+    // Only copy external dependencies (ws package)
+    const externalDeps = ['ws'];
+    
+    if (fs.existsSync(routerNodeModulesDir)) {
+        for (const dep of externalDeps) {
+            const depSrcPath = path.join(routerNodeModulesDir, dep);
+            const depDestPath = path.join(bundledNodeModulesDir, dep);
             
-            for (const dep of depsToInclude) {
-                const depSrcPath = path.join(routerNodeModulesDir, dep);
-                const depDestPath = path.join(bundledNodeModulesDir, dep);
-                
-                if (fs.existsSync(depSrcPath)) {
-                    console.log(`📦 Copying ${dep}...`);
-                    copyDir(depSrcPath, depDestPath, ['.bin', '.cache']); // Exclude problematic dirs
-                } else {
-                    console.log(`⚠️  Dependency ${dep} not found, will be resolved at runtime`);
-                }
+            if (fs.existsSync(depSrcPath)) {
+                console.log(`📦 Copying external dependency: ${dep}...`);
+                copyDir(depSrcPath, depDestPath, ['.bin', '.cache']);
+            } else {
+                console.log(`⚠️  External dependency ${dep} not found`);
             }
-            console.log('✅ Dependencies copied successfully');
-        } else {
-            console.log('⚠️  No node_modules found in router directory');
         }
-        
-        // Create a minimal package.json for the bundled router
-        const bundledPackageJson = {
-            name: routerPackageJson.name,
-            version: routerPackageJson.version,
-            main: routerPackageJson.main,
-            type: routerPackageJson.type,
-            dependencies: routerPackageJson.dependencies
-        };
-        
-        fs.writeFileSync(
-            path.join(bundledDir, 'package.json'),
-            JSON.stringify(bundledPackageJson, null, 2)
-        );
     }
+    
+    // Create package.json with only external dependencies
+    const bundledPackageJson = {
+        name: routerPackageJson.name,
+        version: routerPackageJson.version,
+        main: routerPackageJson.main,
+        type: routerPackageJson.type,
+        dependencies: {
+            ws: routerPackageJson.dependencies.ws
+        }
+    };
+    
+    fs.writeFileSync(
+        path.join(bundledDir, 'package.json'),
+        JSON.stringify(bundledPackageJson, null, 2)
+    );
+    
+    console.log('✅ Router bundled successfully (external dependencies copied)!');
     
     console.log('✅ Shared router bundled successfully!');
     console.log('📍 Bundled to:', bundledDir);

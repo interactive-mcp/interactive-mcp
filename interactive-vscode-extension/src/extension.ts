@@ -541,9 +541,10 @@ async function startLocalMcpServer(context: vscode.ExtensionContext): Promise<bo
 
 async function startNewServer(context: vscode.ExtensionContext): Promise<boolean> {
     try {
-        const serverPath = getServerPath(context);
+        // Use bundled server path directly
+        const serverPath = path.join(context.extensionPath, 'bundled-server', 'dist', 'index.js');
         
-        if (!serverPath) {
+        if (!fs.existsSync(serverPath)) {
             const errorMsg = 'MCP server not found. Please ensure the extension is properly installed.';
             logError('❌ ' + errorMsg);
             vscode.window.showErrorMessage(errorMsg);
@@ -624,29 +625,7 @@ function stopLocalMcpServer() {
 
 
 
-function getServerPath(context: vscode.ExtensionContext): string | null {
-    // Try bundled server first
-    const bundledServerPath = path.join(context.extensionPath, 'bundled-server', 'dist', 'index.js');
-    
-    // Check if bundled server exists
-    try {
-        // fs is already imported at the top
-        if (fs.existsSync(bundledServerPath)) {
-            return bundledServerPath;
-        }
-    } catch (error) {
-        logError('Error checking bundled server', error);
-    }
 
-    // Check custom server path from settings
-    const config = vscode.workspace.getConfiguration('interactiveMcp');
-    const customPath = config.get<string>('serverPath');
-    if (customPath && customPath.trim()) {
-        return customPath;
-    }
-
-    return null;
-}
 
 async function connectToMcpServer(context: vscode.ExtensionContext, retryCount: number = 0) {
     // Prevent overlapping connection attempts with mutex protection
@@ -2395,24 +2374,24 @@ function updateChimeToggle() {
 // Generate and copy MCP configuration JSON to clipboard
 async function copyMcpConfiguration(context: vscode.ExtensionContext, fromCommandPalette: boolean = false) {
     try {
-        const serverPath = getServerPath(context);
+        // Detect if running in Windsurf (which uses serverUrl instead of url)
+        const isWindsurf = vscode.env.appName.toLowerCase().includes('windsurf') || 
+                          vscode.env.appName.toLowerCase().includes('codeium');
         
-        if (!serverPath) {
-            vscode.window.showErrorMessage('MCP server not found. Please ensure the extension is properly installed.');
-            return false;
-        }
-
-        const mcpServerConfig = {
-            "command": "node",
-            "args": [serverPath]
+        const mcpServerConfig = isWindsurf ? {
+            "serverUrl": "http://localhost:8090/mcp"
+        } : {
+            "url": "http://localhost:8090/mcp"
         };
 
         const configJson = `"interactive-mcp": ${JSON.stringify(mcpServerConfig, null, 2)}`;
         await vscode.env.clipboard.writeText(configJson);
         
+        const appType = isWindsurf ? 'Windsurf' : 'your AI assistant';
+        
         if (fromCommandPalette) {
             vscode.window.showInformationMessage(
-                '✅ MCP configuration copied to clipboard!'
+                `✅ MCP configuration copied to clipboard for ${appType}!`
             );
         }
 

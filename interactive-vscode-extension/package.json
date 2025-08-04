@@ -2,7 +2,7 @@
   "name": "interactive-mcp",
   "displayName": "Interactive MCP",
   "description": "Enable AI assistants to ask YOU for input through interactive popups, without interrupting the flow of the conversation.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "raz-labs",
   "icon": "icon.png",
   "author": {

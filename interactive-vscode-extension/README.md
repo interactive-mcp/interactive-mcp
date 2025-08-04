@@ -174,3 +174,16 @@ MIT License - Free to use and modify.
 ---
 
 **Made with ❤️ for seamless AI interactions in VS Code-based editors** 
+
+## Cursor Compatibility
+Cursor (a VS Code fork) may have issues with HTTP transport. The extension automatically detects Cursor and switches to stdio mode. To get the correct MCP config:
+
+1. Run the "Interactive MCP: Copy MCP JSON Configuration" command from the Command Palette (Ctrl+Shift+P).
+2. It will generate a stdio-compatible config with the extension's install path, like:
+   ```json
+   "interactive-mcp": {
+     "command": "node",
+     "args": ["<OS-specific-path-to-bundled-server>/dist/index.js"]
+   }
+   ```
+3. Paste this into your AI assistant's config file. This should work on Windows, macOS, and Linux (only tested on Windows). 

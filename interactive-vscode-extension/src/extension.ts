@@ -442,6 +442,7 @@ export function activate(context: vscode.ExtensionContext) {
     extensionContext = context;
     
     logInfo('Interactive MCP Helper is activating...');
+    logInfo(`Detected appName: ${vscode.env.appName}`);
     
     // Create status bar item
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -561,7 +562,10 @@ async function startNewServer(context: vscode.ExtensionContext): Promise<boolean
         const config = vscode.workspace.getConfiguration("interactiveMcp");
         const mcpHttpPort = config.get<number>("mcpHttpPort") || 8090;
         
-        logInfo(`🌐 Starting MCP server in HTTP mode on port ${mcpHttpPort}`);
+        const isCursor = vscode.env.appName === 'Cursor';
+        const transport = isCursor ? 'stdio' : 'http';
+        
+        logInfo(`🌐 Starting MCP server in ${transport} mode${transport === 'http' ? ` on port ${mcpHttpPort}` : ''}`);
         
         mcpServerProcess = spawn('node', [serverPath], {
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -570,8 +574,8 @@ async function startNewServer(context: vscode.ExtensionContext): Promise<boolean
                 NODE_ENV: 'production',
                 MCP_WORKSPACE: workspaceId,
                 VSCODE_WORKSPACE: workspaceId,
-                MCP_TRANSPORT: 'http',
-                MCP_HTTP_PORT: mcpHttpPort.toString()
+                MCP_TRANSPORT: transport,
+                ...(transport === 'http' ? { MCP_HTTP_PORT: mcpHttpPort.toString() } : {})
             }
         });
 
@@ -600,8 +604,8 @@ async function startNewServer(context: vscode.ExtensionContext): Promise<boolean
         
         const success = mcpServerProcess !== undefined;
         if (success) {
-            logInfo(`✅ MCP server started successfully in HTTP mode on port ${mcpHttpPort}`);
-            logInfo(`🔗 MCP clients can connect to: http://localhost:${mcpHttpPort}/mcp`);
+            logInfo(`✅ MCP server started successfully in ${transport} mode${transport === 'http' ? ` on port ${mcpHttpPort}` : ''}`);
+            logInfo(`🔗 MCP clients can connect to: ${transport === 'http' ? `http://localhost:${mcpHttpPort}/mcp` : 'stdio'}`);
         } else {
             logError('❌ MCP server failed to start within timeout period');
         }
@@ -2373,35 +2377,47 @@ function updateChimeToggle() {
 
 // Generate and copy MCP configuration JSON to clipboard
 async function copyMcpConfiguration(context: vscode.ExtensionContext, fromCommandPalette: boolean = false) {
-    try {
-        // Detect if running in Windsurf (which uses serverUrl instead of url)
-        const isWindsurf = vscode.env.appName.toLowerCase().includes('windsurf') || 
-                          vscode.env.appName.toLowerCase().includes('codeium');
-        
-        const mcpServerConfig = isWindsurf ? {
-            "serverUrl": "http://localhost:8090/mcp"
-        } : {
-            "url": "http://localhost:8090/mcp"
-        };
-
-        const configJson = `"interactive-mcp": ${JSON.stringify(mcpServerConfig, null, 2)}`;
-        await vscode.env.clipboard.writeText(configJson);
-        
-        const appType = isWindsurf ? 'Windsurf' : 'your AI assistant';
-        
-        if (fromCommandPalette) {
-            vscode.window.showInformationMessage(
-                `✅ MCP configuration copied to clipboard for ${appType}!`
-            );
-        }
-
-        return true;
-
-    } catch (error) {
+  logInfo(`Detected appName in copy: ${vscode.env.appName}`);
+  
+  try {
+    // Detect if running in Windsurf (which uses serverUrl instead of url)
+    const appNameLower = vscode.env.appName.toLowerCase();
+    const isWindsurf = appNameLower.includes('windsurf') || appNameLower.includes('codeium');
+    const isCursor = appNameLower.includes('cursor');
+    
+    let configJson;
+    
+    if (isCursor) {
+      const serverPath = path.join(context.extensionPath, 'bundled-server', 'dist', 'index.js');
+      const mcpServerConfig = {
+        "command": "node",
+        "args": [serverPath]
+      };
+      configJson = `"interactive-mcp": ${JSON.stringify(mcpServerConfig, null, 2)}`;
+    } else {
+      const mcpServerConfig = isWindsurf ? {
+        "serverUrl": "http://localhost:8090/mcp"
+      } : {
+        "url": "http://localhost:8090/mcp"
+      };
+      configJson = `"interactive-mcp": ${JSON.stringify(mcpServerConfig, null, 2)}`;
+    }
+    
+    await vscode.env.clipboard.writeText(configJson);
+    
+    const appType = isWindsurf ? 'Windsurf' : (isCursor ? 'Cursor' : 'your AI assistant');
+    const message = isCursor ? '✅ Stdio MCP configuration copied for Cursor!' : '✅ HTTP MCP configuration copied!';
+    
+    if (fromCommandPalette) {
+      vscode.window.showInformationMessage(`${message} Paste into ${appType}'s config.`);
+    }
+    
+    return true;
+  } catch (error) {
         logError('Error generating MCP config', error);
         vscode.window.showErrorMessage(`Failed to generate MCP configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
         return false;
-    }
+  }
 }
 
 

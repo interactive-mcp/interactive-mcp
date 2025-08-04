@@ -87,6 +87,8 @@ The configuration depends on which AI assistant you're using. Here's the general
 2. **Add the MCP server configuration:**
    
    **If this is your first MCP server:**
+   
+   For VS Code, Cursor, and most AI assistants:
    ```json
    {
      "mcpServers": {
@@ -97,7 +99,20 @@ The configuration depends on which AI assistant you're using. Here's the general
    }
    ```
    
+   For Windsurf:
+   ```json
+   {
+     "mcpServers": {
+       "interactive-mcp": {
+         "serverUrl": "http://localhost:8090/mcp"
+       }
+     }
+   }
+   ```
+   
    **If you already have other MCP servers:**
+   
+   For Github Copilot, Cursor, and most AI assistants:
    ```json
    {
      "mcpServers": {
@@ -110,12 +125,28 @@ The configuration depends on which AI assistant you're using. Here's the general
      }
    }
    ```
+   
+   For Windsurf:
+   ```json
+   {
+     "mcpServers": {
+       "existing-server": {
+         // your existing server config
+       },
+       "interactive-mcp": {
+         "serverUrl": "http://localhost:8090/mcp"
+       }
+     }
+   }
+   ```
 
 3. **Save the configuration file**
 
 4. **Restart your IDE** completely
 
 **🌐 MCP Configuration:** The extension uses HTTP transport for a simple, update-resistant configuration:
+
+**For Github Copilot, Cursor, and most AI assistants:**
 ```json
 {
   "mcpServers": {
@@ -125,6 +156,18 @@ The configuration depends on which AI assistant you're using. Here's the general
   }
 }
 ```
+
+**For Windsurf:**
+```json
+{
+  "mcpServers": {
+    "interactive-mcp": {
+      "serverUrl": "http://localhost:8090/mcp"
+    }
+  }
+}
+```
+
 This configuration won't break when you update the extension! See [HTTP-TRANSPORT-README.md](HTTP-TRANSPORT-README.md) for details.
 
 

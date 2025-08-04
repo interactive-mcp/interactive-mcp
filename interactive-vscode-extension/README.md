@@ -60,9 +60,11 @@ After installation, click "Copy MCP JSON Configuration" from the welcome notific
 
 1. Find your AI assistant's MCP configuration file (varies by assistant)
 
-2. Add the copied configuration to the `mcpServers` section:
+2. Add the configuration to the `mcpServers` section:
    
    **If this is your first MCP server:**
+   
+   For Github Copilot, Cursor, and most AI assistants:
    ```json
    {
      "mcpServers": {
@@ -73,7 +75,20 @@ After installation, click "Copy MCP JSON Configuration" from the welcome notific
    }
    ```
    
+   For Windsurf:
+   ```json
+   {
+     "mcpServers": {
+       "interactive-mcp": {
+         "serverUrl": "http://localhost:8090/mcp"
+       }
+     }
+   }
+   ```
+   
    **If you already have other MCP servers:**
+   
+   For Github Copilot, Cursor, and most AI assistants:
    ```json
    {
      "mcpServers": {
@@ -82,6 +97,20 @@ After installation, click "Copy MCP JSON Configuration" from the welcome notific
        },
        "interactive-mcp": {
          "url": "http://localhost:8090/mcp"
+       }
+     }
+   }
+   ```
+   
+   For Windsurf:
+   ```json
+   {
+     "mcpServers": {
+       "existing-server": {
+         // your existing server config
+       },
+       "interactive-mcp": {
+         "serverUrl": "http://localhost:8090/mcp"
        }
      }
    }
